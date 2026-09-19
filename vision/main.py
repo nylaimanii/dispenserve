@@ -44,6 +44,8 @@ from serial_link import Dispenser
 from server import PORT, start_server
 from state import ALREADY_SERVED, DISPENSED, IDLE, SCANNING, SLEEP, AppState
 from telemetry import Telemetry, build_sinks
+from voice import DEFAULT_MODEL as VOICE_MODEL
+from voice import DEFAULT_VOICE_ID, Voice
 
 log = logging.getLogger("dispenserve")
 
@@ -52,6 +54,7 @@ RESULT_SECONDS = 4.0  # how long the kiosk shows dispensed / already_served
 DROPOUT_GRACE_S = 0.5  # a face missing for less than this doesn't reset the hold
 SAME_FACE_MIN_SIM = 0.3  # a face swap mid-hold restarts the hold
 FAKE_SCAN_INTERVAL_S = 10.0
+GOODBYE_WITHIN_S = 90.0  # say goodbye if they leave within this long of getting an item
 NOT_LIVE = "not_live"
 CAMERA_INDEXES = [1, 0]  # external usb webcam first, then the built-in camera
 
@@ -104,8 +107,8 @@ class HoldTracker:
 class Dispenserve:
     """Decision + side effects: kiosk state, counters, and the servo."""
 
-    def __init__(self, store, app_state, dispenser, metrics=None, telemetry=None, ledger=None, require_liveness=False,
-                 use_sensor=False, result_seconds=RESULT_SECONDS):
+    def __init__(self, store, app_state, dispenser, metrics=None, telemetry=None, ledger=None, voice=None,
+                 require_liveness=False, use_sensor=False, result_seconds=RESULT_SECONDS):
         self.store = store
         self.app_state = app_state
         self.dispenser = dispenser
@@ -113,6 +116,7 @@ class Dispenserve:
         self.telemetry = telemetry  # anonymous {machine_id, bay, event, ts} only
         self.ledger = ledger  # Solana donor ledger: restocks and daily totals only
         self.insights = None  # GET /insights (Gemini or rule-based), set in main()
+        self.voice = voice  # fixed spoken lines only
         self.require_liveness = require_liveness
         self.result_seconds = result_seconds
         self.use_sensor = use_sensor
@@ -243,7 +247,16 @@ class Dispenserve:
 
     def person_left(self):
         """Someone walked away (sensor "away", or the frame emptied without a sensor)."""
+        if self._last_dispense_at and time.monotonic() - self._last_dispense_at < GOODBYE_WITHIN_S:
+            self._say("goodbye")
         self._last_dispense_at = 0.0
+
+    def _say(self, kind):
+        if self.voice is not None:
+            try:
+                self.voice.say(kind)
+            except Exception:
+                log.exception("voice failed")
 
     def _emit(self, event):
         if self.telemetry is not None:
@@ -266,6 +279,7 @@ class Dispenserve:
     def _show_result(self, state):
         self.app_state.set_state(state, progress=1.0 if state == DISPENSED else 0.0)
         self._result_until = time.monotonic() + self.result_seconds
+        self._say("dispensed" if state == DISPENSED else "already_served")
 
     def showing_result(self):
         return time.monotonic() < self._result_until
@@ -282,6 +296,8 @@ class Dispenserve:
             if self.app_state.state != IDLE:
                 self.app_state.set_state(IDLE, progress=0.0)
         else:
+            if self.app_state.state != SCANNING:
+                self._say("scanning")
             self.app_state.set_state(SCANNING, progress=scanning_progress)
 
 
@@ -529,6 +545,8 @@ def main(argv=None):
     parser.add_argument("--no-snowflake", action="store_true", help="don't send telemetry to Snowflake")
     parser.add_argument("--no-solana", action="store_true", help="don't write the donor ledger to Solana devnet")
     parser.add_argument("--no-gemini", action="store_true", help="rule-based restock insight only, don't call Gemini")
+    parser.add_argument("--no-elevenlabs", action="store_true", help="speak with macOS say instead of ElevenLabs clips")
+    parser.add_argument("--mute", action="store_true", help="no spoken lines at all")
     parser.add_argument("--flush-solana", action="store_true", help="ask the running app to write today's total to Solana, then exit")
     parser.add_argument("--liveness", action="store_true", help="reject scans that fail the anti-spoof check (default: log only)")
     parser.add_argument("--camera", type=int, help="camera index (default: try 1, then 0)")
@@ -547,8 +565,15 @@ def main(argv=None):
     disabled = {name for name in ("tiger", "snowflake") if getattr(args, f"no_{name}")}
     telemetry = Telemetry(machine_id, build_sinks(config.env, disabled))
     ledger = None if args.no_solana else SolanaLedger.from_env(machine_id, config.env)
+    voice = Voice(
+        api_key=None if args.no_elevenlabs else config.env("ELEVENLABS_API_KEY"),
+        voice_id=config.env("ELEVENLABS_VOICE_ID", DEFAULT_VOICE_ID),
+        model=config.env("ELEVENLABS_MODEL", VOICE_MODEL),
+        mute=args.mute,
+    )
+    voice.prepare()
     disp = Dispenserve(
-        MemoryStore(), app_state, dispenser, telemetry=telemetry, ledger=ledger,
+        MemoryStore(), app_state, dispenser, telemetry=telemetry, ledger=ledger, voice=voice,
         require_liveness=args.liveness, use_sensor=not args.no_sensor and not args.no_serial,
     )
     disp.insights = Insights(
