@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Dispenserve</title>
+<style>
+  :root{
+    --ink: #f2efe9;
+    --ink-dim: #8a877f;
+    --bg: #050505;
+    --amber: #e0a838;
+    --amber-dim: #6b5220;
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background: var(--bg);
+    overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+    cursor: none;
+  }
+  body{
+    display:flex; align-items:center; justify-content:center;
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--ink);
+  }
+  .stage{
+    display:flex; flex-direction:column; align-items:center; gap: 6vh;
+  }
+  .ring-wrap{
+    position: relative;
+    width: 46vh; height: 46vh;
+  }
+  svg{ width:100%; height:100%; transform: rotate(-90deg); display:block; }
+  .track{ fill:none; stroke: #1c1a16; stroke-width: 3; }
+  .oval{ fill:none; stroke: var(--ink-dim); stroke-width: 3; transition: stroke 400ms ease, opacity 400ms ease; }
+  .progress{
+    fill:none; stroke: var(--amber); stroke-width: 3;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 120ms linear, opacity 400ms ease;
+  }
+  .mark{
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    font-size: 8vh; font-weight: 600; letter-spacing: -0.02em;
+    opacity: 0; transition: opacity 400ms ease;
+  }
+  .mark.show{ opacity: 1; }
+  .caption{
+    font-size: 4.4vh; font-weight: 500; text-align:center;
+    line-height: 1.25; max-width: 70vw;
+    transition: opacity 300ms ease;
+  }
+  .caption .item{ color: var(--amber); }
+  .caption.sub{
+    font-size: 2.6vh; color: var(--ink-dim); font-weight: 400; margin-top: -2vh;
+  }
+  .dot{
+    position:fixed; bottom: 3vh; right: 3vh;
+    width: 10px; height:10px; border-radius: 50%;
+    background: #2a2a2a; transition: background 300ms ease;
+  }
+  .dot.live{ background: #3fae5c; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="ring-wrap">
+      <svg viewBox="0 0 200 200">
+        <circle class="track" cx="100" cy="100" r="90"></circle>
+        <circle id="oval" class="oval" cx="100" cy="100" r="90"></circle>
+        <circle id="progress" class="progress" cx="100" cy="100" r="90"
+                stroke-dasharray="565.48" stroke-dashoffset="565.48" opacity="0"></circle>
+      </svg>
+      <div id="mark" class="mark"></div>
+    </div>
+    <div>
+      <div id="caption" class="caption">Step up.</div>
+      <div id="subcaption" class="caption sub"></div>
+    </div>
+  </div>
+  <div id="dot" class="dot"></div>
+
+<script>
+  // ---- Configuration -----------------------------------------------------
+  // Points at the laptop over the hotspot. Override with ?endpoint= if needed.
+  const params = new URLSearchParams(location.search);
+  const ENDPOINT = params.get("endpoint") || "/state";
+  const POLL_MS = 300;
+
+  // ---- Elements ------------------------------------------------------------
+  const oval = document.getElementById("oval");
+  const progress = document.getElementById("progress");
+  const mark = document.getElementById("mark");
+  const caption = document.getElementById("caption");
+  const subcaption = document.getElementById("subcaption");
+  const dot = document.getElementById("dot");
+  const CIRC = 565.48;
+
+  let currentState = null;
+  let everConnected = false;
+  let failCount = 0;
+
+  // Smooth self-driven ring fill so it always looks like 3s even if the
+  // laptop only sends coarse progress ticks.
+  let ringStart = null;
+  let ringRAF = null;
+  function animateRing(){
+    if (currentState !== "scanning"){ cancelAnimationFrame(ringRAF); return; }
+    const elapsed = (performance.now() - ringStart) / 1000;
+    const frac = Math.min(elapsed / 3, 1);
+    progress.style.strokeDashoffset = CIRC * (1 - frac);
+    if (frac < 1) ringRAF = requestAnimationFrame(animateRing);
+  }
+
+  function render(state, data){
+    if (state === currentState) {
+      if (state === "dispensed") setItem(data && data.item);
+      return;
+    }
+    currentState = state;
+
+    oval.style.opacity = state === "scanning" ? 0 : 1;
+    progress.style.opacity = state === "scanning" ? 1 : 0;
+    mark.classList.remove("show");
+    mark.textContent = "";
+
+    if (state === "idle"){
+      progress.style.strokeDashoffset = CIRC;
+      caption.textContent = "Step up.";
+      subcaption.textContent = "";
+    }
+    else if (state === "scanning"){
+      progress.style.strokeDashoffset = CIRC;
+      ringStart = performance.now();
+      cancelAnimationFrame(ringRAF);
+      ringRAF = requestAnimationFrame(animateRing);
+      caption.textContent = "Hold still.";
+      subcaption.textContent = "";
+    }
+    else if (state === "dispensed"){
+      progress.style.strokeDashoffset = 0;
+      mark.textContent = "✓";
+      mark.classList.add("show");
+      caption.textContent = "Take it.";
+      setItem(data && data.item);
+    }
+    else if (state === "already_served"){
+      progress.style.opacity = 0;
+      oval.style.stroke = "var(--ink-dim)";
+      mark.textContent = "—";
+      mark.classList.add("show");
+      caption.textContent = "You've already got yours today.";
+      subcaption.textContent = "Come back tomorrow.";
+    }
+  }
+
+  function setItem(item){
+    subcaption.textContent = item ? item : "";
+  }
+
+  // ---- Demo cycle: runs until the real endpoint answers once --------------
+  const DEMO_SEQUENCE = ["idle", "scanning", "dispensed", "idle", "scanning", "already_served"];
+  let demoIndex = 0;
+  let demoTimer = null;
+  function demoStep(){
+    const state = DEMO_SEQUENCE[demoIndex % DEMO_SEQUENCE.length];
+    demoIndex++;
+    render(state, { item: "Kit Kat", progress: 1 });
+    const hold = state === "scanning" ? 3200 : state === "idle" ? 2200 : 2600;
+    demoTimer = setTimeout(demoStep, hold);
+  }
+  demoStep();
+
+  // ---- Live polling ---------------------------------------------------------
+  async function poll(){
+    try {
+      const res = await fetch(ENDPOINT, { cache: "no-store" });
+      if (!res.ok) throw new Error("bad status");
+      const data = await res.json();
+
+      if (!everConnected){
+        everConnected = true;
+        clearTimeout(demoTimer);
+      }
+      failCount = 0;
+      dot.classList.add("live");
+      render(data.state, data);
+    } catch (err){
+      failCount++;
+      if (everConnected && failCount > 3){
+        // Endpoint dropped mid-event: hold the last real state, no error shown.
+        dot.classList.remove("live");
+      }
+      // Before first real connection, the demo cycle above just keeps running.
+    } finally {
+      setTimeout(poll, POLL_MS);
+    }
+  }
+  poll();
+</script>
+</body>
+</html>

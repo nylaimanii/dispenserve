@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dispenserve — Operator</title>
+<style>
+  :root{
+    --ink: #eeece6;
+    --ink-dim: #9a978d;
+    --bg: #0b0b0a;
+    --panel: #131211;
+    --line: #232220;
+    --amber: #e0a838;
+    --ok: #3fae5c;
+    --low: #d4653f;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; min-height:100vh; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    padding: 6vh 6vw;
+  }
+  .wrap{ max-width: 760px; margin: 0 auto; }
+  h1{
+    font-size: 22px; font-weight: 600; margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .meta{ color: var(--ink-dim); font-size: 14px; margin-bottom: 5vh; }
+  .totals{
+    display:flex; gap: 14px; margin-bottom: 5vh;
+  }
+  .stat{
+    flex:1; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px 20px;
+  }
+  .stat .n{ font-size: 34px; font-weight: 600; color: var(--amber); line-height:1; }
+  .stat .l{ font-size: 13px; color: var(--ink-dim); margin-top: 8px; }
+  table{ width:100%; border-collapse: collapse; margin-bottom: 5vh; }
+  th{
+    text-align:left; font-size: 12px; font-weight: 500; color: var(--ink-dim);
+    padding: 0 0 10px; border-bottom: 1px solid var(--line);
+  }
+  th.num, td.num{ text-align:right; }
+  td{
+    padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 15px;
+  }
+  tr:last-child td{ border-bottom: none; }
+  .bar{
+    width: 100%; height: 5px; background: #1c1a16; border-radius: 3px; margin-top: 6px;
+    overflow:hidden;
+  }
+  .bar > div{ height:100%; background: var(--ok); }
+  .bar.low > div{ background: var(--low); }
+  .empty{ text-align:center; color: var(--ink-dim); padding: 30px 0; font-size: 14px; }
+  .privacy{
+    border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px;
+    font-size: 13px; color: var(--ink-dim); line-height: 1.5;
+  }
+  .privacy b{ color: var(--ink); font-weight: 500; }
+  .status{
+    display:flex; align-items:center; gap: 8px; font-size: 13px; color: var(--ink-dim);
+    margin-top: 4vh;
+  }
+  .status .dot{ width:8px; height:8px; border-radius:50%; background:#2a2a2a; }
+  .status .dot.live{ background: var(--ok); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Dispenserve — Operator</h1>
+  <div class="meta">Restock view</div>
+
+  <div class="totals">
+    <div class="stat">
+      <div class="n" id="dispensedToday">—</div>
+      <div class="l">Dispensed today</div>
+    </div>
+    <div class="stat">
+      <div class="n" id="uniqueToday">—</div>
+      <div class="l">Unique people served today</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Bay</th><th class="num">Remaining</th></tr>
+    </thead>
+    <tbody id="bays">
+      <tr><td colspan="2" class="empty">Waiting for data…</td></tr>
+    </tbody>
+  </table>
+
+  <div class="privacy">
+    <b>No names or images are stored.</b> The machine keeps a numeric match value and a
+    timestamp in memory only, and clears anything older than 24 hours before every scan.
+    There is no database, log, or file this dashboard is reading from a person's identity.
+  </div>
+
+  <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Connecting…</span></div>
+</div>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  const ENDPOINT = params.get("endpoint") || "/stats";
+  const POLL_MS = 2000;
+  const LOW_THRESHOLD = 5;
+
+  const dispensedEl = document.getElementById("dispensedToday");
+  const uniqueEl = document.getElementById("uniqueToday");
+  const baysEl = document.getElementById("bays");
+  const dot = document.getElementById("statusDot");
+  const statusText = document.getElementById("statusText");
+
+  function render(data){
+    dispensedEl.textContent = data.dispensed_today ?? "—";
+    uniqueEl.textContent = data.unique_today ?? "—";
+
+    const bays = data.bays || [];
+    if (!bays.length){
+      baysEl.innerHTML = '<tr><td colspan="2" class="empty">No bays reported.</td></tr>';
+      return;
+    }
+    baysEl.innerHTML = bays.map(b => {
+      const remaining = b.remaining ?? 0;
+      const pct = Math.max(0, Math.min(100, (remaining / (b.capacity || Math.max(remaining, 20))) * 100));
+      const low = remaining <= LOW_THRESHOLD;
+      return `
+        <tr>
+          <td>
+            ${escapeHtml(b.name || "Unnamed bay")}
+            <div class="bar ${low ? "low" : ""}"><div style="width:${pct}%"></div></div>
+          </td>
+          <td class="num">${remaining}</td>
+        </tr>`;
+    }).join("");
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({
+      "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+    }[c]));
+  }
+
+  async function poll(){
+    try {
+      const res = await fetch(ENDPOINT, { cache: "no-store" });
+      if (!res.ok) throw new Error("bad status");
+      const data = await res.json();
+      render(data);
+      dot.classList.add("live");
+      statusText.textContent = "Live";
+    } catch (err){
+      dot.classList.remove("live");
+      statusText.textContent = "Can't reach the machine — showing the last numbers it sent.";
+    } finally {
+      setTimeout(poll, POLL_MS);
+    }
+  }
+  poll();
+</script>
+</body>
+</html>
