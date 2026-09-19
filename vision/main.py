@@ -8,6 +8,7 @@ Run:
     .venv/bin/python vision/main.py                 # webcam + arduino
     .venv/bin/python vision/main.py --no-camera     # fake scans every 10s, for demoing the kiosk
     .venv/bin/python vision/main.py --no-serial     # don't look for the arduino
+    .venv/bin/python vision/main.py --liveness      # reject photo spoofs (default: only log the score)
 
 Keys (camera window, or type + Enter in the terminal with --no-camera):
     f  force dispense    c  clear memory    r  restock bay    q  quit
@@ -24,7 +25,9 @@ import time
 import numpy as np
 
 import config
+import liveness
 from memory import DISPENSE, Decision, MemoryStore, average_embeddings, decide
+from metrics import Metrics
 from serial_link import Dispenser
 from server import PORT, start_server
 from state import ALREADY_SERVED, DISPENSED, IDLE, SCANNING, AppState
@@ -36,6 +39,7 @@ RESULT_SECONDS = 4.0  # how long the kiosk shows dispensed / already_served
 DROPOUT_GRACE_S = 0.5  # a face missing for less than this doesn't reset the hold
 SAME_FACE_MIN_SIM = 0.3  # a face swap mid-hold restarts the hold
 FAKE_SCAN_INTERVAL_S = 10.0
+NOT_LIVE = "not_live"
 CAMERA_INDEXES = [1, 0]  # external usb webcam first, then the built-in camera
 
 
@@ -87,25 +91,36 @@ class HoldTracker:
 class Dispenserve:
     """Decision + side effects: kiosk state, counters, and the servo."""
 
-    def __init__(self, store, app_state, dispenser, result_seconds=RESULT_SECONDS):
+    def __init__(self, store, app_state, dispenser, metrics=None, require_liveness=False, result_seconds=RESULT_SECONDS):
         self.store = store
         self.app_state = app_state
         self.dispenser = dispenser
+        self.metrics = metrics or Metrics()
+        self.require_liveness = require_liveness
         self.result_seconds = result_seconds
         self._result_until = 0.0
         self._serial_queue = queue.Queue()
         threading.Thread(target=self._serial_worker, name="serial", daemon=True).start()
 
     def metrics_json(self):
-        return {"stages": {}}
+        return self.metrics.summary()
 
     # --- scan outcome ---------------------------------------------------------
 
-    def complete_scan(self, embeddings):
-        """Average the hold's embeddings and decide. Any error here fails open (dispense)."""
+    def complete_scan(self, embeddings, landmarks=None):
+        """Average the hold's embeddings and decide. Any error here fails open (dispense).
+
+        landmarks: optional per-frame (kps, landmark_2d_106) pairs for the liveness check.
+        """
+        start = time.perf_counter()
+        if landmarks and not self._liveness_ok(landmarks):
+            self.app_state.set_state(IDLE, progress=0.0)
+            return Decision(NOT_LIVE, None, "liveness")
         try:
-            vec = average_embeddings(embeddings)
-            decision = decide(self.store, vec)
+            with self.metrics.time("average"):
+                vec = average_embeddings(embeddings)
+            with self.metrics.time("decide"):
+                decision = decide(self.store, vec)
         except Exception:
             log.exception("matching failed, failing open and dispensing")
             decision = Decision(DISPENSE, None, "error")
@@ -116,7 +131,23 @@ class Dispenserve:
             self._dispense(new_person=decision.reason == "new")
         else:
             self._show_result(ALREADY_SERVED)
+        self.metrics.record("hold_to_result", (time.perf_counter() - start) * 1000)
         return decision
+
+    def _liveness_ok(self, landmarks):
+        """Always scores and logs. Only rejects with --liveness, and fails open on errors."""
+        try:
+            with self.metrics.time("liveness"):
+                result = liveness.check([k for k, _ in landmarks], [l for _, l in landmarks if l is not None])
+        except Exception:
+            log.exception("liveness check failed, treating as live")
+            return True
+        log.info(
+            "liveness %s: score %.2f (depth %.4f, blink %.2f, %d frames)%s",
+            "pass" if result.live else "FAIL", result.score, result.motion, result.blink, result.frames,
+            "" if self.require_liveness else " [log only]",
+        )
+        return result.live or not self.require_liveness
 
     def force_dispense(self):
         log.info("forced dispense")
@@ -141,7 +172,10 @@ class Dispenserve:
     def _serial_worker(self):
         while True:
             self._serial_queue.get()
-            if self.dispenser.dispense():
+            start = time.perf_counter()
+            ok = self.dispenser.dispense()
+            if ok:
+                self.metrics.record("serial", (time.perf_counter() - start) * 1000)
                 log.info("arduino: ok")
 
     # --- kiosk state ----------------------------------------------------------
@@ -255,7 +289,8 @@ def run_camera(disp, camera_indexes, det_size):
 
             now = time.monotonic()
             try:
-                faces = engine.detect(frame)
+                with disp.metrics.time("detect"):
+                    faces = engine.detect(frame)
             except Exception:
                 log.exception("detection failed on a frame")
                 faces = []
@@ -267,13 +302,15 @@ def run_camera(disp, camera_indexes, det_size):
             elif len(faces) == 1:
                 face = faces[0]
                 try:
-                    lmk = engine.landmarks(frame, face)
-                    emb = engine.embed(frame, face)
-                    if tracker.update(1, now, emb, lmk):
-                        embeddings = tracker.embeddings
+                    with disp.metrics.time("landmarks"):
+                        lmk = engine.landmarks(frame, face)
+                    with disp.metrics.time("embed"):
+                        emb = engine.embed(frame, face)
+                    if tracker.update(1, now, emb, (face.kps, lmk)):
+                        embeddings, landmarks = tracker.embeddings, tracker.landmarks
                         tracker.reset()
-                        disp.complete_scan(embeddings)
-                        del embeddings
+                        disp.complete_scan(embeddings, landmarks)
+                        del embeddings, landmarks
                         armed = False
                 except Exception:
                     log.exception("embedding failed on a frame")
@@ -363,6 +400,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="dispenserve vision app")
     parser.add_argument("--no-camera", action="store_true", help="fake scans every 10s instead of the webcam")
     parser.add_argument("--no-serial", action="store_true", help="don't look for the arduino")
+    parser.add_argument("--liveness", action="store_true", help="reject scans that fail the anti-spoof check (default: log only)")
     parser.add_argument("--camera", type=int, help="camera index (default: try 1, then 0)")
     parser.add_argument("--det-size", type=int, default=640, help="face detector input size")
     parser.add_argument("--port", type=int, default=PORT)
@@ -374,7 +412,7 @@ def main(argv=None):
     app_state = AppState(config.env("BAY_NAME", "Kit Kat"), config.env_int("BAY_CAPACITY", 24))
     dispenser = Dispenser(enabled=not args.no_serial)
     dispenser.connect()
-    disp = Dispenserve(MemoryStore(), app_state, dispenser)
+    disp = Dispenserve(MemoryStore(), app_state, dispenser, require_liveness=args.liveness)
     server = start_server(disp, port=args.port)
 
     stop = threading.Event()
