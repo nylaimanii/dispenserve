@@ -1,77 +1,91 @@
-# dispenserve
+# Dispenserve
 
-**One snack per person per day. The machine never learns who you are.**
+**A free snack dispenser for college students: one item per person per day, and it never learns who anyone is.**
 
 ## Inspiration
 
-Free food on campus disappears fast, and usually to the same few people. Food pantries, club events and study-night snack tables all run into it: the fastest people clear the table and the people who needed it most get nothing. The usual fixes are to swipe an ID, sign a sheet or scan a QR code. All of them make people identify themselves to get a granola bar, and many people who need free food would rather not.
+Free food on campus disappears fast, and usually to the same few people. Food pantries, club events and late-night study tables all hit the same problem: the first people through clear the table, and the students who most needed a snack leave with nothing. The usual fixes are to swipe an ID, sign a sheet or scan a QR code. All of them ask students to identify themselves to get a granola bar, and many of the students who most need free food would rather go without than do that.
 
-We wanted a machine that is fair without tracking anyone. It only needs to know whether a face has been here in the last 24 hours. It doesn't need to know who the person is.
+We wanted a machine that is fair without tracking anyone. It only needs to know one thing: has this face been here in the last 24 hours? It never needs to know who the person is.
 
 ## What it does
 
-Walk up to the kiosk and look at the camera for 3 seconds. A ring on the iPad fills as it scans.
+Walk up to the machine. An ultrasonic sensor notices you and the kiosk fades from a sleeping logo into a face scanner. Look at the camera for 3 seconds while a ring fills and a calm voice says "hold still for a sec."
 
-- **New today?** The servo turns, your item drops, and the kiosk shows what you got.
-- **Already had one?** The kiosk tells you kindly. No alarm, no name.
+- **First time today:** the servo turns a slotted disc, your snack drops, the green light blinks, and you hear "here you go, have a good one."
+- **Already had one:** the red light comes on and the kiosk kindly says "you've already got yours today, come back tomorrow."
+- **Walk away:** "see you tomorrow, thanks for stopping by." The machine goes back to sleep.
 
-Behind the scenes:
+Around the machine:
 
-- Your face becomes a 512-number vector that exists **only in the laptop's RAM** and is purged after 24 hours. No photos, no names, no database of people.
-- If anything goes wrong while matching, it **fails open**: you get the item.
-- Each machine reports only anonymous counts (`machine, bay, dispensed, time`) to a fleet database. Campus staff get a dashboard showing every machine's stock, plus a forecast of when each bay will run out, so they can restock before it's empty.
+- **Staff** get an operator dashboard with stock per bay, jam and low-stock alerts, a Gemini-written restock recommendation, and a fleet view. The fleet view shows every machine on campus and a forecast of when each bay runs out.
+- **Donors** get a public ledger on Solana. Every restock and every day's total is written on chain with an explorer link, so they can watch their money turn into snacks. No student ever appears in it.
+- **Students** get a snack without handing over a name, an ID, or a photo.
 
 ## How we built it
 
-**Hardware.** An Arduino Uno drives a 9g servo that sweeps a slotted disc: each 0→180→0 sweep drops one item. The servo runs on a 4×AA pack with a ground shared with the Uno. The laptop sends `d` over serial; the Arduino sweeps and answers `ok`. A full cycle takes [~3.1 s].
+**Hardware.** An Arduino Uno runs off a 9V battery. A 9g servo sweeps a slotted disc: each 0→180→0 sweep drops one item. The servo is only attached during the sweep, so it draws no power while idle. An HC-SR04 ultrasonic sensor on the front panel reports `near` (someone within 80 cm for half a second) and `away` (nobody for 3 seconds). A green LED blinks on a dispense and a red LED lights on a repeat visit. The laptop sends `d` and the Arduino sweeps, blinks and answers `ok`. A full cycle takes **4.87 s** (0 misses in [N] consecutive test dispenses). A hardware watchdog resets the board if it ever freezes.
 
-**Vision.** Python with insightface (`buffalo_l`): an SCRFD detector finds faces and ArcFace makes a 512-d embedding. The kiosk only starts a scan when **exactly one** face stays in frame, and it restarts if a second face appears or someone swaps in mid-scan. Every frame's embedding over the 3 second hold is averaged into one normalized vector, which is steadier than a single frame. We match it by cosine similarity against everyone in memory, with a threshold of **0.42**.
+**Privacy by design.**
+- Face vectors live **only in RAM**. They are purged after 24 hours and overwritten with zeros, and they're gone when the app quits.
+- While the machine is asleep, camera frames aren't even run through face detection.
+- It **fails open**: any error while matching means the student gets the snack.
+- A test runs a whole session under Python audit hooks. It fails if anything writes a file or connects off the laptop. Every cloud integration has its own test proving exactly what it sends.
 
-**Timing.** Each stage is timed and served at `GET /metrics`. On our laptop's CPU: detection [38] ms, embedding [23] ms and landmarks [2] ms per frame, so a frame takes about [65] ms. After the 3 second hold, the decision takes [~1] ms. From the end of the hold to the item dropping takes [___] ms.
+**Vision.** Python with insightface (`buffalo_l`): SCRFD finds faces and ArcFace makes a 512-number embedding. A scan only starts when **exactly one** face is in frame, and it restarts if a second face appears or someone swaps in. The embeddings from the 3 second hold are averaged into one normalized vector, which is steadier than any single frame. We match it by cosine similarity against everyone in memory, with a threshold of **0.42**.
 
-**Anti-spoofing.** A simple liveness check on the landmarks insightface already gives us:
-1. **Blink**: eye openness (from the 106-point landmarks) dips during the hold.
-2. **Depth**: a flat photo waved in front of the camera only moves its 5 keypoints by a 2D affine transform. A real head is 3D, so the nose shifts relative to the eyes and mouth in a way an affine fit can't explain. That leftover is our depth score.
+**Measured performance** (on our laptop's CPU, from `GET /metrics`):
+- **62 ms per frame** with a face in view: detection 36.5 ms and embedding 25.1 ms, over about 1,800 frames.
+- **1.1 ms** from the end of the hold to the decision (p95 1.5 ms).
+- In live testing, the same person's repeat scans matched with **cosine similarity 0.77 to 0.93**, far above the 0.42 threshold. [Across N different people, the highest similarity between two different people was X.]
 
-It sits behind a `--liveness` flag and only logs by default, so it can never refuse a real person during a demo.
+**Anti-spoofing.** A liveness check built from the landmarks insightface already returns. It counts a blink (eye openness dips) or real 3D motion: a photo waved in front of the camera only moves its keypoints in flat 2D, while a real head's nose shifts relative to its eyes. All 10 of our real scans passed, scoring 1.5 and up (1.0 passes); [a phone photo scored X]. It only logs by default, so it can't turn anyone away during a demo.
 
-**Threshold tuning.** `tune.py` records only similarity **scores** and a yes/no label from user testing, never vectors. It prints false match and missed match rates for thresholds from 0.30 to 0.60. With [N] people and [M] labeled scans, the best threshold was [0.xx]: [x]% false match, [y]% missed match.
+**Fleet telemetry (Tiger Data + Snowflake).** Each event is exactly `{machine_id, bay, event, ts}`. It fans out on background threads to a Tiger Data hypertable, which has an hourly continuous aggregate and retention policies, and to a Snowflake table with a daily-per-bay view. Each destination has its own queue and retry, so one slow service never blocks the other or the camera.
 
-**Fleet.** Anonymous events go into a **Tiger Data** (TimescaleDB) hypertable. A continuous aggregate rolls up dispenses per bay per hour, and retention policies drop raw events after 30 days. A FastAPI service on **DigitalOcean App Platform** serves `/fleet` (stock and last-seen time per machine) and `/forecast`. Forecasting is deliberately plain math: *items left ÷ items per hour over the last 3 hours*. The machine batches telemetry in a background thread, so a slow network never blocks the camera.
+**Fleet API (DigitalOcean).** FastAPI on App Platform serves `/fleet` (stock and last-seen time per machine), `/forecast` and `/ledger`. The forecast is plain arithmetic: *items left ÷ items per hour over the last 3 hours*.
 
-**Kiosk and dashboard.** Plain HTML pages that poll `/state` and `/stats` from the laptop over Wi-Fi, so any iPad on the network can be the kiosk.
+**Donor ledger (Solana).** A restock (`r` on the laptop) and each day's total are written to devnet as Memo-program transactions. We build and sign the transactions ourselves, about 40 lines, and verified them against the `solders` parser and devnet's own simulator. `/ledger` reads them back straight from the chain, so a donor doesn't have to trust our server. Records can only hold plain integer counts, so a vector literally can't be written.
+
+**Restock advice (Gemini).** `/insights` sends Gemini hourly counts, items left and today's unique count. It asks for two sentences staff can act on and caches the answer for 10 minutes. Without a key it falls back to the same arithmetic as the forecast.
+
+**Voice (ElevenLabs).** Three variations of four fixed lines, generated once and cached as mp3s. Playback runs as a subprocess and never blocks. Without a key it uses macOS `say`.
+
+**Kiosk and dashboard.** Plain HTML on any iPad on the same Wi-Fi, polling the laptop. The kiosk is a black screen with a softly pulsing logo while asleep, then fades into a large, high-contrast scanner that's readable from 6 feet.
 
 ## Challenges we ran into
 
-- **The USB hub that hid the Arduino.** The Uno's power light was on, but macOS never showed a serial port, so there was nothing to upload to. The hub was passing power but not data. Plugging straight into the laptop fixed it instantly. Along the way we also found that newer macOS lists USB devices under `system_profiler SPUSBHostDataType`, not the older `SPUSBDataType`.
-- **Servo brownout on USB power.** Powered from the Arduino's 5V pin, the servo pulled enough current at the start of a sweep to reset the Uno mid-dispense. Moving the servo to its own 4×AA pack with a shared ground fixed it.
-- **The Arduino compiler on Apple Silicon.** The AVR toolchain `arduino-cli` downloads is an Intel binary, so compiling failed with `bad CPU type in executable` until we installed Rosetta.
-- **Proving we don't save faces.** It's easy to say. To prove it, we wrote a test that runs a whole fake session under Python audit hooks. It fails if *anything* opens a file for writing or connects off the machine. [Anything it caught?]
-- **Detector jitter vs. real motion.** Keypoints jitter by about a pixel from frame to frame, which is about as big as a small natural head movement. Smoothing over 3 frames helped, but the depth signal only really separates a photo from a real head when the head moves around [8]° or more. That's why blink is part of the check and why liveness is off by default.
+- **The USB hub that hid the Arduino.** The Uno's power light was on, but macOS never showed a serial port. The hub passed power but not data. Plugging straight into the laptop fixed it instantly.
+- **Power.** On USB power, the servo's current draw browned out the Uno mid-sweep. On the 9V battery, one test run froze the board after three sweeps with no clean reset. We attach the servo only while it moves, added a hardware watchdog so a freeze recovers in 2 seconds, and show a jam alert when a dispense doesn't answer.
+- **The Arduino compiler on Apple Silicon.** The AVR toolchain `arduino-cli` downloads is an Intel binary (`bad CPU type in executable`) until Rosetta is installed.
+- **A sensor that isn't there looks like an empty room.** If the ultrasonic sensor were unplugged, the machine would sleep forever. The Arduino now pings once at boot with a 4 m range and reports `nosensor` if nothing ever echoes. The laptop then stays awake.
+- **Proving we don't save faces.** Saying it is easy. Our test runs a full session under Python audit hooks and fails if *anything* opens a file for writing or connects off the machine. We checked that it catches a plain write, a `numpy.save` and an outgoing socket.
+- **Detector jitter vs. real motion.** Keypoints jitter about a pixel between frames, which is about as big as a small natural head movement. Smoothing over 3 frames helped, and blink detection covers the rest.
+- **Rate-limited faucets.** The devnet faucet returned 429s, so we validated our hand-built transactions with devnet's `simulateTransaction` (signature verified) before funding the wallet from the web faucet.
 
 ## Accomplishments that we're proud of
 
-- A privacy promise that's **enforced by a test**, not just written in a doc.
-- It never refuses on error: every failure path we could find ends in a dispense.
-- Real, measured latency: [~65 ms per frame; ~1 ms decision].
-- An end-to-end fleet pipeline, from a laptop at a snack table to a hypertable to a cloud forecast, that never handles personal data at any stage.
-- [___ people served / ___ items dispensed during testing.]
+- A privacy promise that's **enforced by tests**, down to what each sponsor API receives.
+- Six cloud integrations that each **degrade gracefully**: pull any key and the machine keeps dispensing.
+- Real, measured numbers: **62 ms per frame, 1.1 ms to decide, 4.87 s per dispense**.
+- A donor ledger that proves impact publicly without putting a single student on chain.
+- [___ students served / ___ items dispensed during testing.]
 
 ## What we learned
 
-- Averaging embeddings across a short hold makes matching much more stable than trusting a single frame.
+- Averaging embeddings over a short hold makes matching far more stable than trusting one frame.
 - Hardware debugging is mostly power and cables.
-- Deciding "fail open" early made every other design choice simpler.
-- Time-series databases make "what's running low" a small SQL query rather than a separate pipeline.
+- Deciding to fail open early made every other design choice simpler.
+- Privacy is easier to build in than to bolt on. If the cloud only ever gets counts, there's nothing to leak.
 
 ## What's next
 
-- Measure accuracy with more people and publish the false match / missed match curve.
-- Stronger liveness: a challenge-response ("turn your head") or depth from a second camera.
-- Multiple bays per machine, one servo each, and let people choose their item.
-- Restock alerts pushed to staff phones from the forecast.
-- Run the face model on-device on a small board so there's no laptop at all.
+- Measure accuracy with many more people and publish the false match / missed match curve (`tune.py` already does the math).
+- Multiple bays per machine, one servo each, and let students choose.
+- Push restock alerts to staff phones from the forecast.
+- Put the face model on a small on-device board so there's no laptop.
+- Partner with a campus food pantry for a real pilot.
 
 ## Built with
 
-arduino · c++ · python · insightface · onnxruntime · opencv · numpy · pyserial · fastapi · uvicorn · postgresql · timescaledb · tiger-data · digitalocean · docker · html · javascript · pytest
+arduino · c++ · python · insightface · onnxruntime · opencv · numpy · pyserial · fastapi · uvicorn · postgresql · timescaledb · tiger-data · snowflake · solana · gemini · elevenlabs · digitalocean · docker · html · javascript · pytest
