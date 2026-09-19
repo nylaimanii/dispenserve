@@ -32,7 +32,9 @@ log = logging.getLogger("fleet")
 
 def load_dotenv():
     """Reads KEY=VALUE lines from the repo's gitignored .env, if there is one."""
-    for path in (Path(__file__).resolve().parents[2] / ".env", Path.cwd() / ".env"):
+    here = Path(__file__).resolve()
+    repo_root = here.parents[2] if len(here.parents) > 2 else here.parent  # in Docker it's just /app
+    for path in (repo_root / ".env", Path.cwd() / ".env"):
         try:
             lines = path.read_text().splitlines()
         except OSError:
