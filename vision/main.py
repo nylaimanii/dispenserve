@@ -37,6 +37,7 @@ import numpy as np
 import config
 import liveness
 from memory import DISPENSE, Decision, MemoryStore, average_embeddings, decide
+from insights import DEFAULT_MODEL, Insights
 from ledger import SolanaLedger
 from metrics import Metrics
 from serial_link import Dispenser
@@ -111,6 +112,7 @@ class Dispenserve:
         self.metrics = metrics or Metrics()
         self.telemetry = telemetry  # anonymous {machine_id, bay, event, ts} only
         self.ledger = ledger  # Solana donor ledger: restocks and daily totals only
+        self.insights = None  # GET /insights (Gemini or rule-based), set in main()
         self.require_liveness = require_liveness
         self.result_seconds = result_seconds
         self.use_sensor = use_sensor
@@ -122,6 +124,11 @@ class Dispenserve:
 
     def metrics_json(self):
         return self.metrics.summary()
+
+    def insights_json(self):
+        if self.insights is None:
+            self.insights = Insights(self.app_state)  # rule-based only
+        return self.insights.get()
 
     # --- scan outcome ---------------------------------------------------------
 
@@ -521,6 +528,7 @@ def main(argv=None):
     parser.add_argument("--no-tiger", action="store_true", help="don't send telemetry to Tiger Data")
     parser.add_argument("--no-snowflake", action="store_true", help="don't send telemetry to Snowflake")
     parser.add_argument("--no-solana", action="store_true", help="don't write the donor ledger to Solana devnet")
+    parser.add_argument("--no-gemini", action="store_true", help="rule-based restock insight only, don't call Gemini")
     parser.add_argument("--flush-solana", action="store_true", help="ask the running app to write today's total to Solana, then exit")
     parser.add_argument("--liveness", action="store_true", help="reject scans that fail the anti-spoof check (default: log only)")
     parser.add_argument("--camera", type=int, help="camera index (default: try 1, then 0)")
@@ -542,6 +550,11 @@ def main(argv=None):
     disp = Dispenserve(
         MemoryStore(), app_state, dispenser, telemetry=telemetry, ledger=ledger,
         require_liveness=args.liveness, use_sensor=not args.no_sensor and not args.no_serial,
+    )
+    disp.insights = Insights(
+        app_state,
+        api_key=None if args.no_gemini else config.env("GEMINI_API_KEY"),
+        model=config.env("GEMINI_MODEL", DEFAULT_MODEL),
     )
     dispenser.on_sensor = disp.on_sensor
     dispenser.on_connection = disp.on_connection

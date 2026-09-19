@@ -22,12 +22,14 @@ class AppState:
         self._dispensed_today = 0
         self._unique_today = 0
         self._closed_days = []  # (date, dispensed_total) for days that ended while running
+        self._hourly = [0] * 24  # dispensed per local hour, today
 
     def _roll_day(self):
         today = datetime.date.today()
         if today != self._day:
             self._closed_days.append((self._day, self._dispensed_today))
             self._day = today
+            self._hourly = [0] * 24
             self._dispensed_today = 0
             self._unique_today = 0
 
@@ -61,6 +63,7 @@ class AppState:
         with self._lock:
             self._roll_day()
             self._dispensed_today += 1
+            self._hourly[datetime.datetime.now().hour] += 1
             if new_person:
                 self._unique_today += 1
             self._bay["remaining"] = max(0, self._bay["remaining"] - 1)
@@ -72,6 +75,13 @@ class AppState:
             added = self._bay["capacity"] - self._bay["remaining"]
             self._bay["remaining"] = self._bay["capacity"]
             return added
+
+    def hourly_today(self):
+        """{hour: dispensed} for every hour of today so far."""
+        with self._lock:
+            self._roll_day()
+            now_hour = datetime.datetime.now().hour
+            return {h: self._hourly[h] for h in range(now_hour + 1)}
 
     def today(self):
         """(date, dispensed so far today)"""

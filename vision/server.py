@@ -65,6 +65,8 @@ def make_handler(app):
                 self._json(app.app_state.stats_json())
             elif path == "/metrics":
                 self._json(app.metrics_json())
+            elif path == "/insights":
+                self._json(app.insights_json())
             elif path == "/set":
                 self._set(parse_qs(parsed.query))
             elif path == "/flush-solana":
