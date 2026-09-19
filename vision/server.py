@@ -62,7 +62,7 @@ def make_handler(app):
             if path == "/state":
                 self._json(app.app_state.state_json())
             elif path == "/stats":
-                self._json(app.app_state.stats_json())
+                self._json(app.stats_json())
             elif path == "/metrics":
                 self._json(app.metrics_json())
             elif path == "/insights":

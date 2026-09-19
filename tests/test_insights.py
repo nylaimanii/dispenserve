@@ -84,3 +84,9 @@ def test_rule_based_numbers():
     assert "about 2 hours" in I.rule_based(snapshot)
     empty = {**snapshot, "bays": [{"name": "Kit Kat", "items_left": 0, "capacity": 24}]}
     assert "empty" in I.rule_based(empty)
+
+
+def test_slow_bay_does_not_quote_huge_hour_counts():
+    snapshot = {"local_time": "11:58", "bays": [{"name": "Kit Kat", "items_left": 22, "capacity": 24}],
+                "dispensed_per_hour_today": {"08:00": 0, "09:00": 1, "10:00": 0, "11:00": 1}, "unique_people_today": 2}
+    assert "No restock needed today" in I.rule_based(snapshot)

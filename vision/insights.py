@@ -60,6 +60,9 @@ def rule_based(snapshot):
             parts.append(f"{bay['name']} has {left} of {bay['capacity']} left with no recent dispenses, so no restock is needed yet.")
         else:
             hours = left / rate
+            if hours > 12:
+                parts.append(f"{bay['name']} has {left} left and is going slowly (about {rate:.1f} per hour). No restock needed today.")
+                continue
             when = "within the hour" if hours < 1 else f"in about {hours:.0f} hour{'s' if round(hours) != 1 else ''}"
             urgency = "Restock soon." if hours < 3 or left <= LOW_ITEMS else "No rush yet."
             parts.append(f"{bay['name']} has {left} left and is going at about {rate:.1f} per hour, so it runs out {when}. {urgency}")

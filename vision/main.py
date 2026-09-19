@@ -129,6 +129,10 @@ class Dispenserve:
     def metrics_json(self):
         return self.metrics.summary()
 
+    def stats_json(self):
+        """GET /stats: the dashboard's counts, plus a jam flag (last dispense got no "ok")."""
+        return {**self.app_state.stats_json(), "jam": bool(getattr(self.dispenser, "jammed", False))}
+
     def insights_json(self):
         if self.insights is None:
             self.insights = Insights(self.app_state)  # rule-based only

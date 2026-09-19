@@ -8,156 +8,293 @@
   :root{
     --ink: #eeece6;
     --ink-dim: #9a978d;
+    --ink-faint: #6d6a62;
     --bg: #0b0b0a;
     --panel: #131211;
     --line: #232220;
+    --track: #1f1d19;
     --amber: #e0a838;
-    --ok: #3fae5c;
-    --low: #d4653f;
+    /* status colors: always shown with an icon and a label, never alone */
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
   }
   *{ box-sizing:border-box; }
   body{
     margin:0; min-height:100vh; background: var(--bg); color: var(--ink);
     font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-    padding: 6vh 6vw;
+    padding: 40px 24px 60px;
   }
-  .wrap{ max-width: 760px; margin: 0 auto; }
-  h1{
-    font-size: 22px; font-weight: 600; margin: 0 0 4px;
-    letter-spacing: -0.01em;
+  .wrap{ max-width: 980px; margin: 0 auto; }
+  header{ display:flex; align-items:flex-end; justify-content:space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+  h1{ font-size: 24px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  h1 small{ font-size: 15px; font-weight: 400; color: var(--ink-dim); margin-left: 8px; }
+  h2{ font-size: 13px; font-weight: 600; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 12px; }
+  section{ margin-bottom: 34px; }
+
+  .privacy-line{
+    display:flex; align-items:center; gap: 10px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 26px; font-size: 15px;
   }
-  .meta{ color: var(--ink-dim); font-size: 14px; margin-bottom: 5vh; }
-  .totals{
-    display:flex; gap: 14px; margin-bottom: 5vh;
+  .privacy-line .lock{ font-size: 16px; }
+
+  .live{ display:flex; align-items:center; gap: 8px; font-size: 13px; color: var(--ink-dim); }
+  .dot{ width:8px; height:8px; border-radius:50%; background:#3a3833; flex: none; }
+  .dot.on{ background: var(--good); }
+
+  .alerts{ display:flex; flex-direction:column; gap: 8px; margin-bottom: 22px; }
+  .alert{
+    display:flex; align-items:center; gap: 10px; padding: 11px 14px; border-radius: 9px;
+    background: var(--panel); border: 1px solid var(--line); border-left-width: 4px; font-size: 15px;
   }
-  .stat{
-    flex:1; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 10px; padding: 18px 20px;
+  .alert.critical{ border-left-color: var(--critical); }
+  .alert.warning{ border-left-color: var(--warning); }
+  .alert .tag{ font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  .alert.critical .tag{ color: var(--critical); }
+  .alert.warning .tag{ color: var(--warning); }
+
+  .tiles{ display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 22px; }
+  .tile{ background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .tile .n{ font-size: 34px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+  .tile .l{ font-size: 13px; color: var(--ink-dim); margin-top: 8px; }
+
+  .card{ background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .insight-text{ font-size: 17px; line-height: 1.5; margin: 0; }
+  .insight-meta{ font-size: 12px; color: var(--ink-faint); margin-top: 10px; display:flex; gap: 10px; align-items:center; }
+  .badge{
+    font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; color: var(--ink-dim);
   }
-  .stat .n{ font-size: 34px; font-weight: 600; color: var(--amber); line-height:1; }
-  .stat .l{ font-size: 13px; color: var(--ink-dim); margin-top: 8px; }
-  table{ width:100%; border-collapse: collapse; margin-bottom: 5vh; }
+
+  table{ width:100%; border-collapse: collapse; }
   th{
     text-align:left; font-size: 12px; font-weight: 500; color: var(--ink-dim);
-    padding: 0 0 10px; border-bottom: 1px solid var(--line);
+    padding: 0 10px 10px 0; border-bottom: 1px solid var(--line);
   }
-  th.num, td.num{ text-align:right; }
-  td{
-    padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 15px;
-  }
+  td{ padding: 12px 10px 12px 0; border-bottom: 1px solid var(--line); font-size: 15px; vertical-align: top; }
   tr:last-child td{ border-bottom: none; }
-  .bar{
-    width: 100%; height: 5px; background: #1c1a16; border-radius: 3px; margin-top: 6px;
-    overflow:hidden;
-  }
-  .bar > div{ height:100%; background: var(--ok); }
-  .bar.low > div{ background: var(--low); }
-  .empty{ text-align:center; color: var(--ink-dim); padding: 30px 0; font-size: 14px; }
+  .num{ text-align:right; font-variant-numeric: tabular-nums; }
+  .sub{ color: var(--ink-dim); font-size: 13px; }
+
+  .meter{ width: 100%; max-width: 260px; height: 6px; background: var(--track); border-radius: 4px; margin-top: 7px; overflow: hidden; }
+  .meter > div{ height:100%; background: var(--amber); border-radius: 4px; }
+  .meter.low > div{ background: var(--warning); }
+  .meter.empty > div{ background: var(--critical); }
+
+  .state{ display:inline-flex; align-items:center; gap: 5px; font-size: 13px; white-space: nowrap; }
+  .state.good{ color: var(--ink-dim); }
+  .state.warning{ color: var(--warning); }
+  .state.critical{ color: var(--critical); }
+
+  .bay-line{ display:flex; justify-content:space-between; gap: 12px; padding: 3px 0; font-size: 14px; }
+  .ledger-row .what{ font-size: 15px; }
+  a{ color: var(--amber); text-decoration: none; }
+  a:hover{ text-decoration: underline; }
+  .empty{ color: var(--ink-dim); font-size: 14px; padding: 16px 0; }
+  .note{ font-size: 13px; color: var(--ink-faint); margin-top: 10px; }
+
   .privacy{
-    border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px;
-    font-size: 13px; color: var(--ink-dim); line-height: 1.5;
+    border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px;
+    font-size: 13px; color: var(--ink-dim); line-height: 1.55;
   }
   .privacy b{ color: var(--ink); font-weight: 500; }
-  .status{
-    display:flex; align-items:center; gap: 8px; font-size: 13px; color: var(--ink-dim);
-    margin-top: 4vh;
+
+  @media (max-width: 640px){
+    .tiles{ grid-template-columns: 1fr 1fr; }
+    .hide-sm{ display:none; }
   }
-  .status .dot{ width:8px; height:8px; border-radius:50%; background:#2a2a2a; }
-  .status .dot.live{ background: var(--ok); }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Dispenserve — Operator</h1>
-  <div class="meta">Restock view</div>
+  <header>
+    <h1>Dispenserve <small>Operator</small></h1>
+    <div class="live"><span id="liveDot" class="dot"></span><span id="liveText">Connecting…</span></div>
+  </header>
 
-  <div class="totals">
-    <div class="stat">
-      <div class="n" id="dispensedToday">—</div>
-      <div class="l">Dispensed today</div>
-    </div>
-    <div class="stat">
-      <div class="n" id="uniqueToday">—</div>
-      <div class="l">Unique people served today</div>
-    </div>
-  </div>
+  <div class="privacy-line"><span class="lock" aria-hidden="true">🔒</span><b>No names, faces, or images are ever stored.</b></div>
 
-  <table>
-    <thead>
-      <tr><th>Bay</th><th class="num">Remaining</th></tr>
-    </thead>
-    <tbody id="bays">
-      <tr><td colspan="2" class="empty">Waiting for data…</td></tr>
-    </tbody>
-  </table>
+  <div id="alerts" class="alerts" aria-live="polite"></div>
+
+  <section>
+    <h2>This machine</h2>
+    <div class="tiles">
+      <div class="tile"><div class="n" id="dispensedToday">—</div><div class="l">Dispensed today</div></div>
+      <div class="tile"><div class="n" id="uniqueToday">—</div><div class="l">Unique people today</div></div>
+      <div class="tile"><div class="n" id="itemsLeft">—</div><div class="l">Items left</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Bay</th><th class="num">Left</th><th class="num">Status</th></tr></thead>
+      <tbody id="bays"><tr><td colspan="3" class="empty">Waiting for the machine…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Restock insight</h2>
+    <div class="card">
+      <p id="insightText" class="insight-text">Waiting for numbers…</p>
+      <div class="insight-meta"><span id="insightSource" class="badge">—</span><span id="insightTime"></span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Fleet</h2>
+    <table>
+      <thead><tr><th>Machine</th><th class="num hide-sm">Today</th><th>Bays &amp; forecast</th></tr></thead>
+      <tbody id="fleet"><tr><td colspan="3" class="empty">Waiting for the fleet API…</td></tr></tbody>
+    </table>
+    <div id="fleetNote" class="note"></div>
+  </section>
+
+  <section>
+    <h2>Donor ledger <span class="badge">Solana devnet</span></h2>
+    <table>
+      <thead><tr><th>Date</th><th>Record</th><th class="num">Proof</th></tr></thead>
+      <tbody id="ledger"><tr><td colspan="3" class="empty">Waiting for the ledger…</td></tr></tbody>
+    </table>
+    <div id="ledgerNote" class="note">Every restock and daily total is written publicly on chain. No student ever appears in it.</div>
+  </section>
 
   <div class="privacy">
-    <b>No names or images are stored.</b> The machine keeps a numeric match value and a
-    timestamp in memory only, and clears anything older than 24 hours before every scan.
-    There is no database, log, or file this dashboard is reading from a person's identity.
+    <b>How privacy works.</b> To make sure everyone gets one item a day, the machine keeps one
+    anonymous face vector (a list of 512 numbers, not a photo) per person, <b>in memory only</b>,
+    and deletes it after 24 hours. It is never written to disk and never leaves the laptop.
+    Everything on this page, in the fleet database, and on the public ledger is a count.
   </div>
-
-  <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Connecting…</span></div>
 </div>
 
 <script>
   const params = new URLSearchParams(location.search);
-  const ENDPOINT = params.get("endpoint") || "/stats";
-  const POLL_MS = 2000;
-  const LOW_THRESHOLD = 5;
+  const MACHINE = params.get("machine") || "";                 // this laptop, same origin by default
+  const FLEET = (params.get("fleet") || "http://localhost:8080").replace(/\/$/, "");
+  const LOW = 5;
 
-  const dispensedEl = document.getElementById("dispensedToday");
-  const uniqueEl = document.getElementById("uniqueToday");
-  const baysEl = document.getElementById("bays");
-  const dot = document.getElementById("statusDot");
-  const statusText = document.getElementById("statusText");
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const safeExplorer = url => typeof url === "string" && url.startsWith("https://explorer.solana.com/") ? url : null;
 
-  function render(data){
-    dispensedEl.textContent = data.dispensed_today ?? "—";
-    uniqueEl.textContent = data.unique_today ?? "—";
-
-    const bays = data.bays || [];
-    if (!bays.length){
-      baysEl.innerHTML = '<tr><td colspan="2" class="empty">No bays reported.</td></tr>';
-      return;
-    }
-    baysEl.innerHTML = bays.map(b => {
-      const remaining = b.remaining ?? 0;
-      const pct = Math.max(0, Math.min(100, (remaining / (b.capacity || Math.max(remaining, 20))) * 100));
-      const low = remaining <= LOW_THRESHOLD;
-      return `
-        <tr>
-          <td>
-            ${escapeHtml(b.name || "Unnamed bay")}
-            <div class="bar ${low ? "low" : ""}"><div style="width:${pct}%"></div></div>
-          </td>
-          <td class="num">${remaining}</td>
-        </tr>`;
-    }).join("");
+  async function getJSON(url){
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status);
+    return res.json();
   }
 
-  function escapeHtml(s){
-    return String(s).replace(/[&<>"']/g, c => ({
-      "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
-    }[c]));
+  function every(ms, fn){ const run = async () => { try { await fn(); } finally { setTimeout(run, ms); } }; run(); }
+
+  function bayStatus(remaining){
+    if (remaining <= 0) return { cls: "critical", icon: "⛔", label: "Empty" };
+    if (remaining <= LOW) return { cls: "warning", icon: "⚠", label: "Low" };
+    return { cls: "good", icon: "✓", label: "OK" };
   }
 
-  async function poll(){
+  function ago(iso){
+    if (!iso) return "never";
+    const m = Math.round((Date.now() - new Date(iso)) / 60000);
+    if (m < 1) return "just now";
+    if (m < 60) return `${m} min ago`;
+    const h = Math.round(m / 60);
+    return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
+  }
+
+  function hoursText(h){
+    if (h === null || h === undefined) return "no recent use";
+    if (h < 1) return "runs out within the hour";
+    return `runs out in ~${h < 10 ? h.toFixed(1) : Math.round(h)} h`;
+  }
+
+  // ---- this machine ------------------------------------------------------------
+  every(2000, async () => {
     try {
-      const res = await fetch(ENDPOINT, { cache: "no-store" });
-      if (!res.ok) throw new Error("bad status");
-      const data = await res.json();
-      render(data);
-      dot.classList.add("live");
-      statusText.textContent = "Live";
-    } catch (err){
-      dot.classList.remove("live");
-      statusText.textContent = "Can't reach the machine — showing the last numbers it sent.";
-    } finally {
-      setTimeout(poll, POLL_MS);
+      const s = await getJSON(MACHINE + "/stats");
+      $("liveDot").classList.add("on");
+      $("liveText").textContent = "Live";
+      $("dispensedToday").textContent = s.dispensed_today ?? "—";
+      $("uniqueToday").textContent = s.unique_today ?? "—";
+      const bays = s.bays || [];
+      $("itemsLeft").textContent = bays.reduce((n, b) => n + (b.remaining ?? 0), 0);
+
+      $("bays").innerHTML = bays.length ? bays.map(b => {
+        const left = b.remaining ?? 0, cap = b.capacity || Math.max(left, 20);
+        const st = bayStatus(left);
+        const pct = Math.max(0, Math.min(100, left / cap * 100));
+        return `<tr>
+          <td>${esc(b.name || "Unnamed bay")}
+            <div class="meter ${st.cls === "warning" ? "low" : st.cls === "critical" ? "empty" : ""}" title="${left} of ${cap} left"><div style="width:${pct}%"></div></div></td>
+          <td class="num">${left} <span class="sub">/ ${cap}</span></td>
+          <td class="num"><span class="state ${st.cls}">${st.icon} ${st.label}</span></td>
+        </tr>`;
+      }).join("") : `<tr><td colspan="3" class="empty">No bays reported.</td></tr>`;
+
+      const alerts = [];
+      if (s.jam) alerts.push({ cls: "critical", tag: "Jam", text: "The last dispense didn't finish. Check the disc and the battery, then press f to test." });
+      for (const b of bays){
+        const st = bayStatus(b.remaining ?? 0);
+        if (st.cls === "critical") alerts.push({ cls: "critical", tag: "Empty", text: `${b.name} is empty. Refill it and press r.` });
+        else if (st.cls === "warning") alerts.push({ cls: "warning", tag: "Low stock", text: `${b.name} has ${b.remaining} left.` });
+      }
+      $("alerts").innerHTML = alerts.map(a =>
+        `<div class="alert ${a.cls}" role="status"><span aria-hidden="true">${a.cls === "critical" ? "⛔" : "⚠"}</span><span class="tag">${esc(a.tag)}</span><span>${esc(a.text)}</span></div>`
+      ).join("");
+    } catch (e){
+      $("liveDot").classList.remove("on");
+      $("liveText").textContent = "Can't reach the machine. Showing the last numbers it sent.";
     }
-  }
-  poll();
+  });
+
+  // ---- insight (cached 10 min on the machine) -----------------------------------------
+  every(60000, async () => {
+    try {
+      const r = await getJSON(MACHINE + "/insights");
+      $("insightText").textContent = r.text;
+      $("insightSource").textContent = r.source === "gemini" ? "Gemini" : "Estimate";
+      $("insightTime").textContent = r.generated_at ? `updated ${ago(r.generated_at)}` : "";
+    } catch (e){ /* keep the last insight */ }
+  });
+
+  // ---- fleet + forecast -------------------------------------------------------------
+  every(15000, async () => {
+    try {
+      const [fleet, forecast] = await Promise.all([getJSON(FLEET + "/fleet"), getJSON(FLEET + "/forecast")]);
+      const fc = new Map((forecast.bays || []).map(f => [f.machine_id + "|" + f.bay, f]));
+      const machines = fleet.machines || [];
+      $("fleet").innerHTML = machines.length ? machines.map(m => {
+        const bays = (m.bays || []).map(b => {
+          const f = fc.get(m.machine_id + "|" + b.name) || {};
+          const status = f.status === "empty" ? bayStatus(0) : f.status === "low" ? { cls: "warning", icon: "⚠", label: "Low" } : bayStatus(b.remaining);
+          return `<div class="bay-line"><span>${esc(b.name)} <span class="sub">${b.remaining}/${b.capacity} · ${hoursText(f.hours_left)}</span></span>
+                  <span class="state ${status.cls}">${status.icon} ${status.label}</span></div>`;
+        }).join("");
+        return `<tr>
+          <td>${esc(m.machine_id)}<div class="sub"><span class="state"><span class="dot ${m.online ? "on" : ""}"></span>${m.online ? "Online" : "Offline"} · last seen ${ago(m.last_seen)}</span></div></td>
+          <td class="num hide-sm">${m.dispensed_today}</td>
+          <td>${bays}</td>
+        </tr>`;
+      }).join("") : `<tr><td colspan="3" class="empty">No machines have reported yet.</td></tr>`;
+      $("fleetNote").textContent = fleet.source === "fake" ? "Demo data: the fleet API has no database URL yet." : "";
+    } catch (e){
+      $("fleet").innerHTML = `<tr><td colspan="3" class="empty">Fleet API not reachable at ${esc(FLEET)}. Add ?fleet=https://your-app.ondigitalocean.app to the URL.</td></tr>`;
+    }
+  });
+
+  // ---- donor ledger -------------------------------------------------------------------
+  every(30000, async () => {
+    try {
+      const l = await getJSON(FLEET + "/ledger");
+      const rows = l.records || [];
+      $("ledger").innerHTML = rows.length ? rows.slice(0, 12).map(r => {
+        const what = r.type === "restock"
+          ? `Restocked <b>${r.restocked_qty}</b> ${esc(r.bay)}`
+          : `<b>${r.dispensed_total}</b> items given out`;
+        const link = safeExplorer(r.explorer_url);
+        const proof = link ? `<a href="${esc(link)}" target="_blank" rel="noopener">Verify on Solana ↗</a>` : `<span class="badge">example</span>`;
+        return `<tr class="ledger-row"><td>${esc(r.date)}</td><td class="what">${what}<div class="sub">${esc(r.machine_id)}</div></td><td class="num">${proof}</td></tr>`;
+      }).join("") : `<tr><td colspan="3" class="empty">No ledger records yet.</td></tr>`;
+      if (l.note) $("ledgerNote").textContent = l.note;
+    } catch (e){
+      $("ledger").innerHTML = `<tr><td colspan="3" class="empty">Ledger not reachable (it's served by the fleet API).</td></tr>`;
+    }
+  });
 </script>
 </body>
 </html>
