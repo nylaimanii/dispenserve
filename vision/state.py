@@ -3,11 +3,12 @@
 import datetime
 import threading
 
+SLEEP = "sleep"  # nobody at the machine: the camera loop skips face processing entirely
 IDLE = "idle"
 SCANNING = "scanning"
 DISPENSED = "dispensed"
 ALREADY_SERVED = "already_served"
-STATES = (IDLE, SCANNING, DISPENSED, ALREADY_SERVED)
+STATES = (SLEEP, IDLE, SCANNING, DISPENSED, ALREADY_SERVED)
 
 
 class AppState:

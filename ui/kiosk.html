@@ -27,6 +27,39 @@
   }
   .stage{
     display:flex; flex-direction:column; align-items:center; gap: 6vh;
+    transition: opacity 900ms ease, transform 900ms ease;
+  }
+  body.asleep .stage{ opacity: 0; transform: scale(0.96); }
+
+  /* ---- Sleep: black screen, softly breathing logo ---- */
+  .sleep{
+    position: fixed; inset: 0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap: 4vh;
+    opacity: 0; pointer-events: none;
+    transition: opacity 900ms ease;
+  }
+  body.asleep .sleep{ opacity: 1; }
+  .logo{
+    display:flex; flex-direction:column; align-items:center; gap: 3.5vh;
+    animation: breathe 4.5s ease-in-out infinite;
+  }
+  .logo svg{ width: 16vh; height: 16vh; transform: none; }
+  .logo .disc{ fill:none; stroke: var(--amber); stroke-width: 6; }
+  .logo .slot{ fill: var(--amber); }
+  .logo .hub{ fill: var(--amber); }
+  .wordmark{
+    font-size: 7.5vh; font-weight: 600; letter-spacing: -0.03em; color: var(--ink);
+  }
+  .sleep-hint{
+    font-size: 2.6vh; color: var(--ink-dim);
+    animation: breathe 4.5s ease-in-out infinite;
+  }
+  @keyframes breathe{
+    0%, 100% { opacity: 0.35; }
+    50%      { opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .logo, .sleep-hint{ animation: none; opacity: 0.8; }
   }
   .ring-wrap{
     position: relative;
@@ -48,13 +81,13 @@
   }
   .mark.show{ opacity: 1; }
   .caption{
-    font-size: 4.4vh; font-weight: 500; text-align:center;
+    font-size: 5.6vh; font-weight: 500; text-align:center;
     line-height: 1.25; max-width: 70vw;
     transition: opacity 300ms ease;
   }
   .caption .item{ color: var(--amber); }
   .caption.sub{
-    font-size: 2.6vh; color: var(--ink-dim); font-weight: 400; margin-top: -2vh;
+    font-size: 3.4vh; color: var(--ink-dim); font-weight: 400; margin-top: -2vh;
   }
   .dot{
     position:fixed; bottom: 3vh; right: 3vh;
@@ -64,7 +97,19 @@
   .dot.live{ background: #3fae5c; }
 </style>
 </head>
-<body>
+<body class="asleep">
+  <div class="sleep" aria-hidden="true">
+    <div class="logo">
+      <svg viewBox="0 0 100 100">
+        <circle class="disc" cx="50" cy="50" r="40"></circle>
+        <rect class="slot" x="44" y="10" width="12" height="22" rx="4"></rect>
+        <circle class="hub" cx="50" cy="50" r="7"></circle>
+      </svg>
+      <div class="wordmark">Dispenserve</div>
+    </div>
+    <div class="sleep-hint">Free snacks. Walk up to start.</div>
+  </div>
+
   <div class="stage">
     <div class="ring-wrap">
       <svg viewBox="0 0 200 200">
@@ -115,6 +160,13 @@
   }
 
   function render(state, data){
+    // sleep is its own layer: fade the scanner out and the logo in, and back
+    document.body.classList.toggle("asleep", state === "sleep");
+    if (state === "sleep"){
+      currentState = "sleep";
+      cancelAnimationFrame(ringRAF);
+      return;
+    }
     if (state === currentState) {
       if (state === "dispensed") setItem(data && data.item);
       return;
@@ -161,14 +213,14 @@
   }
 
   // ---- Demo cycle: runs until the real endpoint answers once --------------
-  const DEMO_SEQUENCE = ["idle", "scanning", "dispensed", "idle", "scanning", "already_served"];
+  const DEMO_SEQUENCE = ["sleep", "idle", "scanning", "dispensed", "idle", "scanning", "already_served"];
   let demoIndex = 0;
   let demoTimer = null;
   function demoStep(){
     const state = DEMO_SEQUENCE[demoIndex % DEMO_SEQUENCE.length];
     demoIndex++;
     render(state, { item: "Kit Kat", progress: 1 });
-    const hold = state === "scanning" ? 3200 : state === "idle" ? 2200 : 2600;
+    const hold = state === "scanning" ? 3200 : state === "idle" ? 2200 : state === "sleep" ? 4000 : 2600;
     demoTimer = setTimeout(demoStep, hold);
   }
   demoStep();

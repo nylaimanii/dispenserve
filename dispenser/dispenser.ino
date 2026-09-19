@@ -10,6 +10,8 @@
 //   'x'       -> red LED on for 3s (already served), no reply
 //   sensor    -> "near" when something is within 80cm for 0.5s,
 //                "away" when nothing is within 80cm for 3s
+//                "nosensor" once at boot if the sensor never echoes (not wired?),
+//                so the laptop knows to stay awake instead of sleeping forever
 //
 // A watchdog resets the board if it ever freezes (e.g. a brownout from a sagging
 // battery that doesn't trigger a clean reset). After a reset it prints "ready" again.
@@ -34,6 +36,7 @@ const unsigned long NEAR_HOLD_MS = 500;
 const unsigned long AWAY_HOLD_MS = 3000;
 const unsigned long SENSOR_INTERVAL_MS = 60;  // HC-SR04 needs ~60ms between pings
 const unsigned long ECHO_TIMEOUT_US = 6000;   // ~100cm round trip; no echo = nothing near
+const unsigned long SELFTEST_TIMEOUT_US = 25000;  // ~4m: a working sensor almost always sees a wall
 
 Servo disc;
 
@@ -78,13 +81,13 @@ void dispense() {
   farSince = 0;
 }
 
-long readDistanceCm() {
+long readDistanceCm(unsigned long timeoutUs) {
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
-  unsigned long echo = pulseIn(ECHO_PIN, HIGH, ECHO_TIMEOUT_US);
+  unsigned long echo = pulseIn(ECHO_PIN, HIGH, timeoutUs);
   if (echo == 0) return -1;  // nothing within range
   return echo / 58;
 }
@@ -93,7 +96,7 @@ void updateSensor(unsigned long now) {
   if (now - lastPing < SENSOR_INTERVAL_MS) return;
   lastPing = now;
 
-  long cm = readDistanceCm();
+  long cm = readDistanceCm(ECHO_TIMEOUT_US);
   bool near = cm > 0 && cm <= NEAR_CM;
 
   if (near) {
@@ -129,6 +132,14 @@ void setup() {
   disc.detach();
 
   Serial.println("ready");
+
+  bool echoed = false;
+  for (int i = 0; i < 5 && !echoed; i++) {
+    echoed = readDistanceCm(SELFTEST_TIMEOUT_US) > 0;
+    delay(60);
+  }
+  if (!echoed) Serial.println("nosensor");
+
   wdt_enable(WDTO_2S);
 }
 

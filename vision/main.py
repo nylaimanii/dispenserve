@@ -9,6 +9,11 @@ Run:
     .venv/bin/python vision/main.py --no-camera     # fake scans every 10s, for demoing the kiosk
     .venv/bin/python vision/main.py --no-serial     # don't look for the arduino
     .venv/bin/python vision/main.py --liveness      # reject photo spoofs (default: only log the score)
+    .venv/bin/python vision/main.py --no-sensor     # ignore the ultrasonic sensor, never sleep
+
+Sleep / wake: with the Arduino's ultrasonic sensor, the machine sleeps until someone is
+standing within 80cm ("near"), and goes back to sleep when they leave ("away"). While
+asleep, frames are not run through face detection at all.
 
 Keys (camera window, or type + Enter in the terminal with --no-camera):
     f  force dispense    c  clear memory    r  restock bay    q  quit
@@ -30,7 +35,7 @@ from memory import DISPENSE, Decision, MemoryStore, average_embeddings, decide
 from metrics import Metrics
 from serial_link import Dispenser
 from server import PORT, start_server
-from state import ALREADY_SERVED, DISPENSED, IDLE, SCANNING, AppState
+from state import ALREADY_SERVED, DISPENSED, IDLE, SCANNING, SLEEP, AppState
 from telemetry import Telemetry
 
 log = logging.getLogger("dispenserve")
@@ -92,7 +97,8 @@ class HoldTracker:
 class Dispenserve:
     """Decision + side effects: kiosk state, counters, and the servo."""
 
-    def __init__(self, store, app_state, dispenser, metrics=None, telemetry=None, require_liveness=False, result_seconds=RESULT_SECONDS):
+    def __init__(self, store, app_state, dispenser, metrics=None, telemetry=None, require_liveness=False,
+                 use_sensor=False, result_seconds=RESULT_SECONDS):
         self.store = store
         self.app_state = app_state
         self.dispenser = dispenser
@@ -100,7 +106,10 @@ class Dispenserve:
         self.telemetry = telemetry  # anonymous {machine_id, bay, event, ts} only
         self.require_liveness = require_liveness
         self.result_seconds = result_seconds
+        self.use_sensor = use_sensor
+        self.awake = True  # without a working sensor the machine is always awake
         self._result_until = 0.0
+        self._last_dispense_at = 0.0
         self._serial_queue = queue.Queue()
         threading.Thread(target=self._serial_worker, name="serial", daemon=True).start()
 
@@ -134,6 +143,7 @@ class Dispenserve:
         else:
             self._show_result(ALREADY_SERVED)
             self._emit("already_served")
+            self._serial_queue.put("x")  # red LED
         self.metrics.record("hold_to_result", (time.perf_counter() - start) * 1000)
         return decision
 
@@ -169,10 +179,41 @@ class Dispenserve:
         remaining = self.app_state.record_dispense(new_person)
         self.app_state.set_item(self.app_state.bay_name)
         self._show_result(DISPENSED)
+        self._last_dispense_at = time.monotonic()
         self._emit("dispensed")
         if remaining == 0:
             log.warning("%s is empty, press r after restocking", self.app_state.bay_name)
-        self._serial_queue.put(True)
+        self._serial_queue.put("d")
+
+    # --- sleep / wake -----------------------------------------------------------
+
+    def on_sensor(self, line):
+        """From the serial thread: "near" wakes the scanner, "away" puts it to sleep."""
+        if not self.use_sensor:
+            return
+        if line == "nosensor":
+            log.warning("arduino reports no ultrasonic sensor, staying awake")
+            self.use_sensor = False
+            self.awake = True
+        elif line == "near" and not self.awake:
+            log.info("someone is here, waking up")
+            self.awake = True
+        elif line == "away" and self.awake:
+            log.info("nobody here, going to sleep")
+            self.awake = False
+            self.person_left()
+
+    def on_connection(self, connected):
+        """The board resets on connect and starts with nobody near, so sleep until "near".
+        If it goes away, stay awake: a missing sensor must never stop the machine."""
+        if not self.use_sensor:
+            return
+        self.awake = not connected
+        log.info("sensor %s: %s", "connected" if connected else "lost", "asleep until someone walks up" if connected else "staying awake")
+
+    def person_left(self):
+        """Someone walked away (sensor "away", or the frame emptied without a sensor)."""
+        self._last_dispense_at = 0.0
 
     def _emit(self, event):
         if self.telemetry is not None:
@@ -180,7 +221,10 @@ class Dispenserve:
 
     def _serial_worker(self):
         while True:
-            self._serial_queue.get()
+            command = self._serial_queue.get()
+            if command == "x":
+                self.dispenser.show_refused()
+                continue
             start = time.perf_counter()
             ok = self.dispenser.dispense()
             if ok:
@@ -199,6 +243,10 @@ class Dispenserve:
     def tick(self, scanning_progress=None):
         """Called every loop iteration to keep /state in sync with the hold."""
         if self.showing_result():
+            return
+        if not self.awake:
+            if self.app_state.state != SLEEP:
+                self.app_state.set_state(SLEEP, progress=0.0)
             return
         if scanning_progress is None:
             if self.app_state.state != IDLE:
@@ -297,6 +345,18 @@ def run_camera(disp, camera_indexes, det_size):
                 continue
 
             now = time.monotonic()
+            if not disp.awake and not disp.showing_result():
+                # asleep: the frame is not looked at, not even for face detection
+                tracker.reset()
+                armed = True
+                disp.tick(None)
+                frame[:] = 0
+                draw_overlay(frame, [], disp.app_state.state_json())
+                cv2.imshow("dispenserve", frame)
+                key = cv2.waitKey(30) & 0xFF
+                if key != 0xFF and not handle_key(chr(key), disp):
+                    return
+                continue
             try:
                 with disp.metrics.time("detect"):
                     faces = engine.detect(frame)
@@ -308,6 +368,8 @@ def run_camera(disp, camera_indexes, det_size):
                 tracker.reset()
                 if not faces and not disp.showing_result():
                     armed = True
+                    if not disp.use_sensor:
+                        disp.person_left()
             elif len(faces) == 1:
                 face = faces[0]
                 try:
@@ -376,10 +438,14 @@ def run_fake(disp, stop, interval=FAKE_SCAN_INTERVAL_S, hold_seconds=HOLD_SECOND
     log.info("no-camera mode: fake scan every %.0fs", interval)
     next_scan = time.monotonic() + interval - hold_seconds
     while not stop.is_set():
-        if stop.wait(max(0.0, next_scan - time.monotonic())):
-            return
+        while time.monotonic() < next_scan:
+            disp.tick(None)  # keeps /state in sync with sleep / wake between scans
+            if stop.wait(min(0.2, max(0.0, next_scan - time.monotonic()))):
+                return
         start = time.monotonic()
         next_scan = start + interval
+        if not disp.awake:
+            continue  # nobody at the machine, so nobody to scan
         while (elapsed := time.monotonic() - start) < hold_seconds:
             disp.tick(elapsed / hold_seconds)
             if stop.wait(0.1):
@@ -409,6 +475,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="dispenserve vision app")
     parser.add_argument("--no-camera", action="store_true", help="fake scans every 10s instead of the webcam")
     parser.add_argument("--no-serial", action="store_true", help="don't look for the arduino")
+    parser.add_argument("--no-sensor", action="store_true", help="ignore the ultrasonic sensor and stay awake")
     parser.add_argument("--liveness", action="store_true", help="reject scans that fail the anti-spoof check (default: log only)")
     parser.add_argument("--camera", type=int, help="camera index (default: try 1, then 0)")
     parser.add_argument("--det-size", type=int, default=640, help="face detector input size")
@@ -420,9 +487,14 @@ def main(argv=None):
 
     app_state = AppState(config.env("BAY_NAME", "Kit Kat"), config.env_int("BAY_CAPACITY", 24))
     dispenser = Dispenser(enabled=not args.no_serial)
-    dispenser.connect()
     telemetry = Telemetry(config.env("MACHINE_ID", "dispenserve-1"), config.env("TIGER_DATABASE_URL"))
-    disp = Dispenserve(MemoryStore(), app_state, dispenser, telemetry=telemetry, require_liveness=args.liveness)
+    disp = Dispenserve(
+        MemoryStore(), app_state, dispenser, telemetry=telemetry,
+        require_liveness=args.liveness, use_sensor=not args.no_sensor and not args.no_serial,
+    )
+    dispenser.on_sensor = disp.on_sensor
+    dispenser.on_connection = disp.on_connection
+    dispenser.start()
     server = start_server(disp, port=args.port)
 
     stop = threading.Event()

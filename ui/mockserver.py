@@ -17,6 +17,7 @@ Drive it from another terminal, or a browser tab, with query params:
     http://localhost:8000/set?state=dispensed&item=Kit+Kat
     http://localhost:8000/set?state=already_served
     http://localhost:8000/set?state=idle
+    http://localhost:8000/set?state=sleep
     http://localhost:8000/set?state=scanning&progress=0.5
 
 With no manual /set calls, it free-runs through idle -> scanning ->
@@ -55,8 +56,8 @@ stats = {
 }
 
 AUTO_DRIVE = True  # set False once /set is being called for real testing
-SEQUENCE = ["idle", "scanning", "dispensed", "idle", "scanning", "already_served"]
-HOLD_SECONDS = {"idle": 2.5, "scanning": 3.0, "dispensed": 2.5, "already_served": 2.5}
+SEQUENCE = ["sleep", "idle", "scanning", "dispensed", "idle", "scanning", "already_served"]
+HOLD_SECONDS = {"sleep": 4.0, "idle": 2.5, "scanning": 3.0, "dispensed": 2.5, "already_served": 2.5}
 
 
 def auto_driver():
