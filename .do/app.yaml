@@ -35,3 +35,6 @@ services:
       - key: FORECAST_WINDOW_HOURS
         scope: RUN_TIME
         value: "3"
+      - key: SOLANA_LEDGER_ADDRESSES  # comma-separated devnet wallet addresses of the machines
+        scope: RUN_TIME
+        value: ""

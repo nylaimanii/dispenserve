@@ -6,6 +6,7 @@ onnxruntime
 pyserial
 psycopg[binary]
 snowflake-connector-python
+cryptography
 # fleet API (cloud/api/) and tests
 fastapi
 uvicorn

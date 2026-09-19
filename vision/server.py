@@ -67,6 +67,12 @@ def make_handler(app):
                 self._json(app.metrics_json())
             elif path == "/set":
                 self._set(parse_qs(parsed.query))
+            elif path == "/flush-solana":
+                # only from this laptop (python vision/main.py --flush-solana), not the network
+                if self.client_address[0] not in ("127.0.0.1", "::1"):
+                    self._json({"ok": False, "error": "local only"}, 403)
+                else:
+                    self._json(app.flush_solana())
             elif path in PAGES:
                 self._page(PAGES[path])
             else:

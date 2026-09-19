@@ -10,6 +10,8 @@ Run:
     .venv/bin/python vision/main.py --no-serial     # don't look for the arduino
     .venv/bin/python vision/main.py --liveness      # reject photo spoofs (default: only log the score)
     .venv/bin/python vision/main.py --no-sensor     # ignore the ultrasonic sensor, never sleep
+    .venv/bin/python vision/main.py --flush-solana  # write today's total to the donor ledger now
+                                                    # (asks the running app; it also writes at midnight)
 
 Sleep / wake: with the Arduino's ultrasonic sensor, the machine sleeps until someone is
 standing within 80cm ("near"), and goes back to sleep when they leave ("away"). While
@@ -20,18 +22,22 @@ Keys (camera window, or type + Enter in the terminal with --no-camera):
 """
 
 import argparse
+import datetime
+import json
 import logging
 import queue
 import signal
 import sys
 import threading
 import time
+import urllib.request
 
 import numpy as np
 
 import config
 import liveness
 from memory import DISPENSE, Decision, MemoryStore, average_embeddings, decide
+from ledger import SolanaLedger
 from metrics import Metrics
 from serial_link import Dispenser
 from server import PORT, start_server
@@ -97,13 +103,14 @@ class HoldTracker:
 class Dispenserve:
     """Decision + side effects: kiosk state, counters, and the servo."""
 
-    def __init__(self, store, app_state, dispenser, metrics=None, telemetry=None, require_liveness=False,
+    def __init__(self, store, app_state, dispenser, metrics=None, telemetry=None, ledger=None, require_liveness=False,
                  use_sensor=False, result_seconds=RESULT_SECONDS):
         self.store = store
         self.app_state = app_state
         self.dispenser = dispenser
         self.metrics = metrics or Metrics()
         self.telemetry = telemetry  # anonymous {machine_id, bay, event, ts} only
+        self.ledger = ledger  # Solana donor ledger: restocks and daily totals only
         self.require_liveness = require_liveness
         self.result_seconds = result_seconds
         self.use_sensor = use_sensor
@@ -171,9 +178,25 @@ class Dispenserve:
         log.info("memory cleared")
 
     def restock(self):
-        self.app_state.restock()
+        added = self.app_state.restock()
         self._emit("restocked")
-        log.info("restocked %s", self.app_state.bay_name)
+        log.info("restocked %s (+%d)", self.app_state.bay_name, added)
+        if self.ledger is not None:
+            self.ledger.record_restock(datetime.date.today(), self.app_state.bay_name, added)
+
+    def flush_solana(self):
+        """Write today's running total to the donor ledger now."""
+        if self.ledger is None:
+            return {"ok": False, "error": "solana ledger is off (no SOLANA_KEYPAIR_PATH, or --no-solana)"}
+        day, total = self.app_state.today()
+        return {"ok": True, "queued": self.ledger.record_daily_total(day, total)}
+
+    def close_finished_days(self):
+        """Called about once a minute: writes the total for any day that just ended."""
+        for day, total in self.app_state.pop_closed_days():
+            log.info("day %s ended with %d dispensed", day, total)
+            if self.ledger is not None:
+                self.ledger.record_daily_total(day, total)
 
     def _dispense(self, new_person):
         remaining = self.app_state.record_dispense(new_person)
@@ -467,6 +490,25 @@ def read_stdin_keys(disp, stop):
             return
 
 
+def watch_days(disp, stop):
+    while not stop.wait(60):
+        disp.close_finished_days()
+
+
+def flush_running_app(port):
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/flush-solana", timeout=5) as res:
+            reply = json.loads(res.read())
+    except OSError as e:
+        log.error("couldn't reach the running app on port %d (%s). Is vision/main.py running?", port, e)
+        return 1
+    if reply.get("ok"):
+        log.info("queued for Solana: %s", reply["queued"])
+        return 0
+    log.error("%s", reply.get("error"))
+    return 1
+
+
 def raise_interrupt(*_):
     raise KeyboardInterrupt  # so SIGTERM runs the same cleanup as Ctrl+C
 
@@ -478,6 +520,8 @@ def main(argv=None):
     parser.add_argument("--no-sensor", action="store_true", help="ignore the ultrasonic sensor and stay awake")
     parser.add_argument("--no-tiger", action="store_true", help="don't send telemetry to Tiger Data")
     parser.add_argument("--no-snowflake", action="store_true", help="don't send telemetry to Snowflake")
+    parser.add_argument("--no-solana", action="store_true", help="don't write the donor ledger to Solana devnet")
+    parser.add_argument("--flush-solana", action="store_true", help="ask the running app to write today's total to Solana, then exit")
     parser.add_argument("--liveness", action="store_true", help="reject scans that fail the anti-spoof check (default: log only)")
     parser.add_argument("--camera", type=int, help="camera index (default: try 1, then 0)")
     parser.add_argument("--det-size", type=int, default=640, help="face detector input size")
@@ -486,13 +530,17 @@ def main(argv=None):
 
     config.load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s", datefmt="%H:%M:%S")
+    if args.flush_solana:
+        return flush_running_app(args.port)
+    machine_id = config.env("MACHINE_ID", "dispenserve-1")
 
     app_state = AppState(config.env("BAY_NAME", "Kit Kat"), config.env_int("BAY_CAPACITY", 24))
     dispenser = Dispenser(enabled=not args.no_serial)
     disabled = {name for name in ("tiger", "snowflake") if getattr(args, f"no_{name}")}
-    telemetry = Telemetry(config.env("MACHINE_ID", "dispenserve-1"), build_sinks(config.env, disabled))
+    telemetry = Telemetry(machine_id, build_sinks(config.env, disabled))
+    ledger = None if args.no_solana else SolanaLedger.from_env(machine_id, config.env)
     disp = Dispenserve(
-        MemoryStore(), app_state, dispenser, telemetry=telemetry,
+        MemoryStore(), app_state, dispenser, telemetry=telemetry, ledger=ledger,
         require_liveness=args.liveness, use_sensor=not args.no_sensor and not args.no_serial,
     )
     dispenser.on_sensor = disp.on_sensor
@@ -502,6 +550,7 @@ def main(argv=None):
 
     stop = threading.Event()
     signal.signal(signal.SIGTERM, raise_interrupt)
+    threading.Thread(target=watch_days, args=(disp, stop), name="days", daemon=True).start()
     try:
         if args.no_camera:
             threading.Thread(target=read_stdin_keys, args=(disp, stop), daemon=True).start()
@@ -517,8 +566,10 @@ def main(argv=None):
         server.shutdown()
         dispenser.close()
         telemetry.close()
+        if ledger is not None:
+            ledger.close()
         log.info("bye")
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

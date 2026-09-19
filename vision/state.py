@@ -21,10 +21,12 @@ class AppState:
         self._day = datetime.date.today()
         self._dispensed_today = 0
         self._unique_today = 0
+        self._closed_days = []  # (date, dispensed_total) for days that ended while running
 
     def _roll_day(self):
         today = datetime.date.today()
         if today != self._day:
+            self._closed_days.append((self._day, self._dispensed_today))
             self._day = today
             self._dispensed_today = 0
             self._unique_today = 0
@@ -65,8 +67,24 @@ class AppState:
             return self._bay["remaining"]
 
     def restock(self):
+        """Refill to capacity. Returns how many items were added."""
         with self._lock:
+            added = self._bay["capacity"] - self._bay["remaining"]
             self._bay["remaining"] = self._bay["capacity"]
+            return added
+
+    def today(self):
+        """(date, dispensed so far today)"""
+        with self._lock:
+            self._roll_day()
+            return self._day, self._dispensed_today
+
+    def pop_closed_days(self):
+        """Days that ended since the last call, as (date, dispensed_total)."""
+        with self._lock:
+            self._roll_day()
+            days, self._closed_days = self._closed_days, []
+            return days
 
     def state_json(self):
         with self._lock:
