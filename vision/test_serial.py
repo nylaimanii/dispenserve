@@ -18,8 +18,8 @@ def main():
         sys.exit("no arduino found (looked for /dev/cu.usbmodem* and /dev/cu.usbserial*)")
 
     print(f"opening {port} at 9600")
-    # timeout covers a full dispense cycle (~0.4 + 1.1 + 0.5 + 1.1 s) with margin
-    with serial.Serial(port, 9600, timeout=5) as ser:
+    # timeout covers a full dispense cycle (sweep, hold, shake, sweep back) with margin
+    with serial.Serial(port, 9600, timeout=10) as ser:
         time.sleep(2)  # opening the port resets the uno
         print(ser.readline().decode(errors="replace").strip() or "(no ready line)")
 
