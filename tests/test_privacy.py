@@ -22,6 +22,7 @@ from memory import MemoryStore
 from serial_link import Dispenser
 from server import start_server
 from state import AppState
+from sinks.base import CallbackSink
 from telemetry import EVENTS, FIELDS, Telemetry
 
 REPO = Path(__file__).resolve().parent.parent
@@ -82,7 +83,7 @@ def get(port, path):
 def run_session():
     """Returns (app, http responses, outcomes, telemetry events that would have left the machine)."""
     outgoing = []
-    telemetry = Telemetry("machine-a", sink=outgoing.extend, batch_size=5, flush_interval=0.05)
+    telemetry = Telemetry("machine-a", sinks=[CallbackSink(outgoing.extend)], batch_size=5, flush_interval=0.05)
     app = Dispenserve(MemoryStore(), AppState("Kit Kat", 24), Dispenser(enabled=False), telemetry=telemetry, result_seconds=0)
     server = start_server(app, host="127.0.0.1", port=0)
     port = server.server_address[1]

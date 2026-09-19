@@ -5,6 +5,7 @@ insightface
 onnxruntime
 pyserial
 psycopg[binary]
+snowflake-connector-python
 # fleet API (cloud/api/) and tests
 fastapi
 uvicorn

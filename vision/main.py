@@ -36,7 +36,7 @@ from metrics import Metrics
 from serial_link import Dispenser
 from server import PORT, start_server
 from state import ALREADY_SERVED, DISPENSED, IDLE, SCANNING, SLEEP, AppState
-from telemetry import Telemetry
+from telemetry import Telemetry, build_sinks
 
 log = logging.getLogger("dispenserve")
 
@@ -476,6 +476,8 @@ def main(argv=None):
     parser.add_argument("--no-camera", action="store_true", help="fake scans every 10s instead of the webcam")
     parser.add_argument("--no-serial", action="store_true", help="don't look for the arduino")
     parser.add_argument("--no-sensor", action="store_true", help="ignore the ultrasonic sensor and stay awake")
+    parser.add_argument("--no-tiger", action="store_true", help="don't send telemetry to Tiger Data")
+    parser.add_argument("--no-snowflake", action="store_true", help="don't send telemetry to Snowflake")
     parser.add_argument("--liveness", action="store_true", help="reject scans that fail the anti-spoof check (default: log only)")
     parser.add_argument("--camera", type=int, help="camera index (default: try 1, then 0)")
     parser.add_argument("--det-size", type=int, default=640, help="face detector input size")
@@ -487,7 +489,8 @@ def main(argv=None):
 
     app_state = AppState(config.env("BAY_NAME", "Kit Kat"), config.env_int("BAY_CAPACITY", 24))
     dispenser = Dispenser(enabled=not args.no_serial)
-    telemetry = Telemetry(config.env("MACHINE_ID", "dispenserve-1"), config.env("TIGER_DATABASE_URL"))
+    disabled = {name for name in ("tiger", "snowflake") if getattr(args, f"no_{name}")}
+    telemetry = Telemetry(config.env("MACHINE_ID", "dispenserve-1"), build_sinks(config.env, disabled))
     disp = Dispenserve(
         MemoryStore(), app_state, dispenser, telemetry=telemetry,
         require_liveness=args.liveness, use_sensor=not args.no_sensor and not args.no_serial,
