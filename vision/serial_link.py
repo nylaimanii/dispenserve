@@ -10,7 +10,7 @@ log = logging.getLogger("dispenserve.serial")
 PORT_PATTERNS = ["/dev/cu.usbmodem*", "/dev/cu.usbserial*", "/dev/cu.wchusbserial*"]
 BAUD = 9600
 RESET_WAIT_S = 2.0  # opening the port resets the uno
-OK_TIMEOUT_S = 5.0
+OK_TIMEOUT_S = 8.0  # a dispense takes ~4.9s (sweeps at 1 degree / 10ms)
 
 
 def find_port():

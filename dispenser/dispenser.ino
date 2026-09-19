@@ -1,34 +1,153 @@
+// dispenserve dispenser
+//
+// Power: 9V battery into the barrel jack, servo on the 5V pin.
+// The servo is only attached (powered with a signal) during a sweep, so it doesn't
+// draw holding current or jitter while idle.
+//
+// Serial, 9600 baud:
+//   boot      -> "ready"
+//   'd'       -> sweep 0 -> 180 -> 0, green LED blinks 3 times, then "ok"
+//   'x'       -> red LED on for 3s (already served), no reply
+//   sensor    -> "near" when something is within 80cm for 0.5s,
+//                "away" when nothing is within 80cm for 3s
+//
+// A watchdog resets the board if it ever freezes (e.g. a brownout from a sagging
+// battery that doesn't trigger a clean reset). After a reset it prints "ready" again.
+
 #include <Servo.h>
+#include <avr/wdt.h>
 
 const int SERVO_PIN = 9;
-const int STEP_DELAY_MS = 6;  // 1 degree per 6ms
+const int TRIG_PIN = 3;
+const int ECHO_PIN = 4;
+const int GREEN_LED = 6;
+const int RED_LED = 7;
+
+const int STEP_DELAY_MS = 10;  // 1 degree per 10ms
+const int DETACH_PAUSE_MS = 300;
+const int GREEN_BLINKS = 3;
+const int BLINK_MS = 150;
+const unsigned long RED_ON_MS = 3000;
+
+const int NEAR_CM = 80;
+const unsigned long NEAR_HOLD_MS = 500;
+const unsigned long AWAY_HOLD_MS = 3000;
+const unsigned long SENSOR_INTERVAL_MS = 60;  // HC-SR04 needs ~60ms between pings
+const unsigned long ECHO_TIMEOUT_US = 6000;   // ~100cm round trip; no echo = nothing near
 
 Servo disc;
 
-void sweep(int from, int to) {
+bool someoneNear = false;
+unsigned long nearSince = 0;  // 0 = not currently seeing something near
+unsigned long farSince = 0;   // 0 = not currently seeing nothing
+unsigned long lastPing = 0;
+unsigned long redOffAt = 0;
+
+// Moves one degree at a time. While blinking, toggles the green LED so the
+// blink happens during the sweep instead of adding time before "ok".
+void sweep(int from, int to, bool blinkGreen) {
   int step = (to > from) ? 1 : -1;
+  unsigned long start = millis();
   for (int pos = from; pos != to + step; pos += step) {
     disc.write(pos);
+    wdt_reset();
+    if (blinkGreen) {
+      unsigned long t = millis() - start;
+      bool on = t < (unsigned long)GREEN_BLINKS * 2 * BLINK_MS && (t / BLINK_MS) % 2 == 0;
+      digitalWrite(GREEN_LED, on ? HIGH : LOW);
+    }
     delay(STEP_DELAY_MS);
+  }
+  digitalWrite(GREEN_LED, LOW);
+}
+
+void dispense() {
+  delay(400);
+  disc.write(0);
+  disc.attach(SERVO_PIN);
+  sweep(0, 180, true);
+  wdt_reset();
+  delay(500);
+  sweep(180, 0, false);
+  disc.detach();
+  delay(DETACH_PAUSE_MS);
+  Serial.println("ok");
+
+  // the sensor wasn't read during the sweep, so start its timers fresh
+  nearSince = 0;
+  farSince = 0;
+}
+
+long readDistanceCm() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+  unsigned long echo = pulseIn(ECHO_PIN, HIGH, ECHO_TIMEOUT_US);
+  if (echo == 0) return -1;  // nothing within range
+  return echo / 58;
+}
+
+void updateSensor(unsigned long now) {
+  if (now - lastPing < SENSOR_INTERVAL_MS) return;
+  lastPing = now;
+
+  long cm = readDistanceCm();
+  bool near = cm > 0 && cm <= NEAR_CM;
+
+  if (near) {
+    farSince = 0;
+    if (nearSince == 0) nearSince = now;
+    if (!someoneNear && now - nearSince >= NEAR_HOLD_MS) {
+      someoneNear = true;
+      Serial.println("near");
+    }
+  } else {
+    nearSince = 0;
+    if (farSince == 0) farSince = now;
+    if (someoneNear && now - farSince >= AWAY_HOLD_MS) {
+      someoneNear = false;
+      Serial.println("away");
+    }
   }
 }
 
 void setup() {
+  wdt_disable();
   Serial.begin(9600);
-  disc.attach(SERVO_PIN);
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+  digitalWrite(TRIG_PIN, LOW);
+
+  // home the disc to 0 degrees, then let go
   disc.write(0);
+  disc.attach(SERVO_PIN);
+  delay(400);
+  disc.detach();
+
   Serial.println("ready");
+  wdt_enable(WDTO_2S);
 }
 
 void loop() {
+  wdt_reset();
   if (Serial.available() > 0) {
     char c = Serial.read();
     if (c == 'd') {
-      delay(400);
-      sweep(0, 180);
-      delay(500);
-      sweep(180, 0);
-      Serial.println("ok");
+      dispense();
+    } else if (c == 'x') {
+      digitalWrite(RED_LED, HIGH);
+      redOffAt = millis() + RED_ON_MS;
     }
   }
+
+  unsigned long now = millis();
+  if (redOffAt != 0 && (long)(now - redOffAt) >= 0) {
+    digitalWrite(RED_LED, LOW);
+    redOffAt = 0;
+  }
+  updateSensor(now);
 }
