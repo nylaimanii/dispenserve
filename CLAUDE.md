@@ -5,8 +5,8 @@ A dispenser that gives one item per person per day. A laptop camera does face ma
 ## Layout
 
 - `dispenser/` — Arduino sketch. Servo on pin 9, serial at 9600 baud. Prints `ready` on boot; on `d` it runs one dispense sweep and prints `ok`.
-- `vision/` — Python face matching + serial control of the Arduino. Venv lives in `.venv` (pyserial, opencv-python, numpy).
-- `web/` — kiosk + dashboard pages. **Owned by a teammate: do not edit anything in `web/`.**
+- `vision/` — Python face matching + serial control of the Arduino. Venv lives in `.venv` (pyserial, opencv-python, numpy, insightface, onnxruntime).
+- `ui/` — kiosk + dashboard pages and a mock server (`mockserver.py`). **Owned by a teammate: do not edit anything in `ui/`.**
 
 ## Privacy and matching rules
 
@@ -29,4 +29,4 @@ The dashboard reads:
 GET /stats -> { "bays": [{ "name": ..., "remaining": ... }], "dispensed_today": ..., "unique_today": ... }
 ```
 
-Keep these shapes stable; the pages in `web/` depend on them.
+Keep these shapes stable; the pages in `ui/` depend on them.
