@@ -157,3 +157,92 @@ def test_telemetry_is_anonymous_counts_only():
         assert all(isinstance(v, str) and len(v) <= 64 for v in event.values())
     # nothing distinguishes one person's events from another's
     assert len({json.dumps({k: v for k, v in e.items() if k != "ts"}) for e in outgoing}) == 3
+
+
+def test_every_integration_together_sends_no_face_data():
+    """A full session with every integration on (fake transports), under the audit hooks."""
+    import base64
+
+    import insights as insights_mod
+    import ledger as ledger_mod
+    import voice as voice_mod
+    from sinks.snowflake_sink import SnowflakeSink
+
+    outgoing = []  # every payload that would leave the laptop, as text
+
+    class Capture:
+        def cursor(self):
+            return self
+
+        def executemany(self, sql, rows):
+            outgoing.append(json.dumps(rows))
+
+        def close(self):
+            pass
+
+        closed = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def rpc(method, params):
+        if method == "getLatestBlockhash":
+            return {"value": {"blockhash": ledger_mod.b58encode(bytes(32))}}
+        outgoing.append(base64.b64decode(params[0]).decode("utf-8", errors="ignore"))
+        return "sig"
+
+    def gemini(url, headers, body):
+        outgoing.append(json.dumps(body))
+        return {"candidates": [{"content": {"parts": [{"text": "Restock soon. Kit Kat is going fast."}]}}]}
+
+    class Proc:
+        def poll(self):
+            return 0
+
+        def terminate(self):
+            pass
+
+    spoken = []
+    from sinks.tiger_sink import TigerSink
+
+    sinks = [TigerSink("unused", connect=Capture), SnowflakeSink({"account": "a", "table": "EVENTS"}, connect=Capture)]
+    telemetry = Telemetry("machine-a", sinks=sinks, batch_size=5, flush_interval=0.05)
+    ledger = ledger_mod.SolanaLedger("machine-a", ledger_mod.Keypair.generate(), rpc=rpc)
+    voice = voice_mod.Voice(api_key=None, player=lambda args: spoken.append(args) or Proc())
+    voice._has_say, voice._has_afplay = True, False
+    state = AppState("Kit Kat", 24)
+    app = Dispenserve(MemoryStore(), state, Dispenser(enabled=False), telemetry=telemetry, ledger=ledger, voice=voice, result_seconds=0)
+    app.insights = insights_mod.Insights(state, api_key="k", transport=gemini)
+    crowd = FakeCrowd(people=4, seed=11)
+
+    repo_before, temp_before = snapshot_repo(), snapshot_temp()
+    _events.clear()
+    _recording.set()
+    try:
+        for _ in range(10):
+            app.complete_scan(crowd.hold())
+            app.person_left()
+        app.restock()
+        app.flush_solana()
+        app.insights_json()
+        import time as _time
+
+        _time.sleep(0.4)
+        telemetry.close()
+        ledger.close()
+    finally:
+        _recording.clear()
+
+    assert _events == [], f"disk or network activity during the session: {_events}"
+    assert snapshot_repo() - repo_before == set()
+    assert snapshot_temp() - temp_before == set()
+    assert len(outgoing) >= 4  # tiger, snowflake, 2 solana memos, gemini
+    blob = "\n".join(outgoing)
+    for person in crowd.people:
+        for decimals in (3, 4, 6):
+            assert f"{person[0]:.{decimals}f}" not in blob
+            assert f"{person[1]:.{decimals}f}" not in blob
+    assert all(args[3] in {t for texts in voice_mod.LINES.values() for t in texts} for args in spoken)

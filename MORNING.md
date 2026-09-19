@@ -1,39 +1,33 @@
-# Morning notes
+# Status
 
-All six parts are done, and each one is committed and pushed. The camera and the Arduino were not touched overnight.
+All 9 parts are done, and each one is committed and pushed. **90 tests pass** (`.venv/bin/pytest`), none needing hardware or keys.
 
-## What got built
+## What works (tested)
 
-1. **`vision/main.py`**, the real app. 3s single-face hold, averaged vector, `decide()` in `vision/memory.py`, serial dispense (waits up to 5s for `ok`), fail-open, `/state` `/stats` `/metrics` on port 8000 with CORS, and it serves `ui/` pages read-only. Keys f/c/r/q, plus `--no-camera`, `--no-serial` and `--liveness`.
-2. **Tests**: 48, all passing (`.venv/bin/pytest`). The privacy test uses Python audit hooks to catch any file write or off-machine connection during a full fake session. I checked that it really catches a write, a `numpy.save` and an outgoing connection.
-3. **`liveness.py`** (blink + depth, logs only by default), **`tune.py`** (try `--demo`), and per-stage timings at `/metrics`.
-4. **Telemetry**, only `{machine_id, bay, event, ts}`. Plus `cloud/schema.sql`, the `cloud/api` FastAPI service (`/fleet`, `/forecast`, `--fake`), a Dockerfile and `.do/app.yaml`.
-5. **README** (with a mermaid diagram), **PRIVACY.md**, **DEVPOST.md** ([brackets] mark where real numbers go).
-6. `.env` is gitignored, CLAUDE.md is updated, and I added a root `requirements.txt`.
+- **Arduino (uploaded):** the new sketch is on the board. Servo attaches only while sweeping at 1°/10ms, green and red LEDs, sensor logic, watchdog. `d` → `ok` in **4.87 s**, 20/20 on the last two runs. One earlier run **froze the board after 3 sweeps** (power, most likely the 9V feeding the servo through the 5V pin). I added a watchdog that resets a frozen board within 2s, a longer 8s timeout on the laptop, and a jam alert on the dashboard.
+- **Sleep / wake:** tested with fakes and the real board. The ultrasonic sensor isn't wired yet: the board reported `nosensor`, and the app correctly stayed awake. **`near` / `away` haven't been tested on real hardware.** While asleep, the camera loop does zero face detection (checked).
+- **Kiosk sleep screen:** a pulsing slotted-disc logo on black, with a smooth fade into the scanner (checked in Chrome).
+- **Dashboard:** machine stats, jam and low-stock alerts, insight, fleet, donor ledger with explorer links, and the "no names, faces, or images" line (checked in Chrome).
+- **Tiger Data:** the new sink wrote to a real local TimescaleDB.
+- **Snowflake:** the code is tested against a fake connection only.
+- **Solana:** transactions were verified by the `solders` parser and devnet's simulator. `/ledger` reads real devnet. No real transaction was sent: the faucet rate-limited me.
+- **Gemini:** tested with a fake transport.
+- **ElevenLabs:** tested with a fake transport. The macOS `say` fallback voice is present.
+- **Fleet API:** Docker image builds and serves `/fleet`, `/forecast` and `/ledger`.
 
-## Verified beyond the unit tests
+## Needs a key (follow SETUP_KEYS.md, in order)
 
-- The real face models ran on insightface's bundled sample photo, cropped in memory. Same person gave `already_served` (1.00), a different person gave `dispense` (0.06), and the mirrored photo still matched (0.96).
-- Frame timing: detect ~38 ms, embed ~23 ms, landmarks ~2 ms; decision ~1 ms. Re-measure with the real camera for Devpost.
-- **Tiger Data path, end to end, against a real TimescaleDB 2.30 in Docker.** The schema applies and can be re-run. `telemetry.py` pushed events, the continuous aggregate picked them up, and `/fleet` and `/forecast` returned exactly the expected numbers.
-- The API Docker image builds and runs in both fake and database modes. This caught a startup crash inside Docker, which is now fixed.
-
-## Needs a key or URL
-
-- `TIGER_DATABASE_URL` in `.env`, for both the laptop and the fleet API. Then run once: `psql "$TIGER_DATABASE_URL" -f cloud/schema.sql`. Without it, the laptop only logs events and the API serves fake data.
-- DigitalOcean: `doctl auth init`, then `doctl apps create --spec .do/app.yaml`, then set `TIGER_DATABASE_URL` as a secret in the app settings. I didn't validate the spec with `doctl`, since it isn't installed; it parses as YAML.
-- Set `MACHINE_ID` per laptop, and `FLEET_TZ` (defaults to UTC) for the fleet API.
+`GEMINI_API_KEY`, `ELEVENLABS_API_KEY` (coupon in HopHacks Discord #coupon-codes), `SOLANA_KEYPAIR_PATH` (+ fund it at faucet.solana.com, then `SOLANA_LEDGER_ADDRESSES`), `TIGER_DATABASE_URL`, the `SNOWFLAKE_*` six, and `doctl auth init` for DigitalOcean. Without them everything falls back, and the startup log lists what's off.
 
 ## Test first
 
-1. `.venv/bin/python vision/main.py` with the webcam and Arduino plugged in directly, not through the hub. Do a full scan → dispense, then scan again → already_served.
-2. Open `http://<laptop-ip>:8000/kiosk.html` on the iPad. Stop `ui/mockserver.py` first, because both use port 8000.
-3. Run `vision/tune.py` with a few people, and put the best threshold into `MATCH_THRESHOLD` if it differs from 0.42.
-4. Read the logged liveness scores for a real face and for a phone photo before ever turning on `--liveness`.
+1. **Wire the HC-SR04** (trig 3, echo 4, 5V, GND) and the LEDs (6, 7 through 220Ω), then run `.venv/bin/python vision/main.py --camera 0`. Walk up: the log should say "waking up". Walk away for 3s: "going to sleep".
+2. **Do 10 real dispenses.** If you see "jam" alerts, the 9V is sagging: use a fresh battery, or give the servo a 4×AA pack with a shared ground.
+3. **Add the Gemini and ElevenLabs keys first** (fastest). Restart, and the log should say "generated 12 ElevenLabs clips".
+4. **Solana:** keypair → fund → press `r` → open the explorer link.
+5. **Fill the [brackets] in DEVPOST.md** with real numbers.
 
-## Weak spots, and things for your teammate
+## Notes
 
-- **Liveness depth is weak.** On synthetic data it only separates a photo from a real head when the head moves about 8° or more; blinks carry the rest. The thresholds are guesses, and that's why it stays log-only.
-- **The dashboard's privacy blurb (in `ui/`, not edited) is inaccurate.** It says the machine keeps "a numeric match value and a timestamp". It actually keeps a 512-number face vector and a timestamp. Worth fixing before judges read it.
-- **Fleet on the dashboard:** fetch `GET <fleet-url>/fleet` and `GET <fleet-url>/forecast` (CORS is open). Each machine in `/fleet` has `bays: [{name, remaining, capacity}]`, the same shape the dashboard already renders, plus `last_seen`, `online` and `dispensed_today`. `/forecast` gives per-bay `hours_left`, `runs_out_at` and `status` (ok/low/empty/idle), soonest first. Locally: `cd cloud/api && ../../.venv/bin/python app.py --fake` serves it on :8080.
-- Nothing is failing right now. Docker images are still on disk: `timescale/timescaledb:latest-pg17` and `dispenserve-fleet:test`. Remove them with `docker rmi` if you need the space.
+- `ui/mockserver.py` and `main.py` both use port 8000. Run one at a time.
+- A throwaway devnet keypair from testing lives in my scratch folder, not the repo. Docker images `timescale/timescaledb:latest-pg17` and `dispenserve-fleet:test` are still on disk (`docker rmi` them if you need space).
