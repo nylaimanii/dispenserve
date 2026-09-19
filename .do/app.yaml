@@ -1,0 +1,37 @@
+# DigitalOcean App Platform spec for the dispenserve fleet API.
+#
+# Deploy (one command, after `doctl auth init`):
+#   doctl apps create --spec .do/app.yaml
+# Then set TIGER_DATABASE_URL in the app's settings (it's a secret, so it isn't in this file).
+# Until it's set, the API serves generated demo data for 3 machines.
+
+name: dispenserve-fleet
+region: nyc
+services:
+  - name: fleet-api
+    github:
+      repo: nylaimanii/dispenserve
+      branch: main
+      deploy_on_push: true
+    source_dir: cloud/api
+    dockerfile_path: cloud/api/Dockerfile
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    health_check:
+      http_path: /health
+    routes:
+      - path: /
+    envs:
+      - key: TIGER_DATABASE_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: FLEET_TZ
+        scope: RUN_TIME
+        value: "UTC"
+      - key: BAY_CAPACITY
+        scope: RUN_TIME
+        value: "24"
+      - key: FORECAST_WINDOW_HOURS
+        scope: RUN_TIME
+        value: "3"

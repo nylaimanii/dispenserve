@@ -31,6 +31,7 @@ from metrics import Metrics
 from serial_link import Dispenser
 from server import PORT, start_server
 from state import ALREADY_SERVED, DISPENSED, IDLE, SCANNING, AppState
+from telemetry import Telemetry
 
 log = logging.getLogger("dispenserve")
 
@@ -91,11 +92,12 @@ class HoldTracker:
 class Dispenserve:
     """Decision + side effects: kiosk state, counters, and the servo."""
 
-    def __init__(self, store, app_state, dispenser, metrics=None, require_liveness=False, result_seconds=RESULT_SECONDS):
+    def __init__(self, store, app_state, dispenser, metrics=None, telemetry=None, require_liveness=False, result_seconds=RESULT_SECONDS):
         self.store = store
         self.app_state = app_state
         self.dispenser = dispenser
         self.metrics = metrics or Metrics()
+        self.telemetry = telemetry  # anonymous {machine_id, bay, event, ts} only
         self.require_liveness = require_liveness
         self.result_seconds = result_seconds
         self._result_until = 0.0
@@ -131,6 +133,7 @@ class Dispenserve:
             self._dispense(new_person=decision.reason == "new")
         else:
             self._show_result(ALREADY_SERVED)
+            self._emit("already_served")
         self.metrics.record("hold_to_result", (time.perf_counter() - start) * 1000)
         return decision
 
@@ -159,15 +162,21 @@ class Dispenserve:
 
     def restock(self):
         self.app_state.restock()
+        self._emit("restocked")
         log.info("restocked %s", self.app_state.bay_name)
 
     def _dispense(self, new_person):
         remaining = self.app_state.record_dispense(new_person)
         self.app_state.set_item(self.app_state.bay_name)
         self._show_result(DISPENSED)
+        self._emit("dispensed")
         if remaining == 0:
             log.warning("%s is empty, press r after restocking", self.app_state.bay_name)
         self._serial_queue.put(True)
+
+    def _emit(self, event):
+        if self.telemetry is not None:
+            self.telemetry.emit(self.app_state.bay_name, event)
 
     def _serial_worker(self):
         while True:
@@ -412,7 +421,8 @@ def main(argv=None):
     app_state = AppState(config.env("BAY_NAME", "Kit Kat"), config.env_int("BAY_CAPACITY", 24))
     dispenser = Dispenser(enabled=not args.no_serial)
     dispenser.connect()
-    disp = Dispenserve(MemoryStore(), app_state, dispenser, require_liveness=args.liveness)
+    telemetry = Telemetry(config.env("MACHINE_ID", "dispenserve-1"), config.env("TIGER_DATABASE_URL"))
+    disp = Dispenserve(MemoryStore(), app_state, dispenser, telemetry=telemetry, require_liveness=args.liveness)
     server = start_server(disp, port=args.port)
 
     stop = threading.Event()
@@ -431,6 +441,7 @@ def main(argv=None):
         disp.clear_memory()
         server.shutdown()
         dispenser.close()
+        telemetry.close()
         log.info("bye")
 
 
