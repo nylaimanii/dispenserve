@@ -1,0 +1,12 @@
+# the machine (vision/)
+numpy
+opencv-python
+insightface
+onnxruntime
+pyserial
+psycopg[binary]
+# fleet API (cloud/api/) and tests
+fastapi
+uvicorn
+httpx
+pytest
