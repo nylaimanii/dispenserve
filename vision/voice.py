@@ -45,7 +45,10 @@ LINES = {
 
 AUDIO_DIR = Path(__file__).resolve().parent / "audio"
 API_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128"
-DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # "Rachel": calm, clear; override with ELEVENLABS_VOICE_ID
+# "Sarah": soft and friendly, and one of the built-in voices a free account can use
+# through the API. Voice Library voices need a paid plan (HTTP 402). Override with
+# ELEVENLABS_VOICE_ID; Lily (pFZP5JQG7iQjIQuC4Bku) and George (JBFqnCBsd6RMkjVDRZzb) also work.
+DEFAULT_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 DEFAULT_MODEL = "eleven_multilingual_v2"
 SAY_VOICE = "Samantha"
 SCANNING_GAP_S = 8.0  # don't repeat "hold still" on every restarted hold

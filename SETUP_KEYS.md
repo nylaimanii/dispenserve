@@ -11,7 +11,9 @@ Do these in order. Each one is optional: skip any and that feature falls back (t
 - [ ] **2. ElevenLabs** (3 minutes)
   - Sign up at https://elevenlabs.io. The coupon for extra credits is in the **HopHacks Discord, #coupon-codes**. The free tier alone covers our 12 lines (under 500 characters).
   - Profile (bottom left) → **API Keys** → create one. Give it text-to-speech access.
-  - `.env`: `ELEVENLABS_API_KEY=...` (optional: `ELEVENLABS_VOICE_ID=` any voice id from the Voice Library)
+  - `.env`: `ELEVENLABS_API_KEY=...`
+  - **Voice ids:** a free account can't use Voice Library voices through the API (`402 paid_plan_required`). The built-in ones work: Sarah `EXAVITQu4vr4xnSDxMaL` (the default), Lily `pFZP5JQG7iQjIQuC4Bku`, George `JBFqnCBsd6RMkjVDRZzb`, Adam `pNInz6obpgDQGcFmaJgB`. Set `ELEVENLABS_VOICE_ID` to switch; the clips regenerate on the next start.
+  - The key only needs text-to-speech permission. A scoped key can't list voices or read the account, which is fine.
   - Check: start the app; the log says `generated 12 ElevenLabs clips` and `vision/audio/` fills with mp3s.
 
 - [ ] **3. Solana devnet** (5 minutes, no account needed)

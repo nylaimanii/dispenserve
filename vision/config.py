@@ -21,6 +21,7 @@ def load_dotenv(path=REPO_ROOT / ".env"):
             continue
         key, value = line.split("=", 1)
         key = key.strip().removeprefix("export ").strip()
+        value = value.split(" #", 1)[0].split("\t#", 1)[0]  # trailing comment
         value = value.strip().strip('"').strip("'")
         os.environ.setdefault(key, value)
 
