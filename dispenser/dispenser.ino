@@ -9,6 +9,7 @@
 //   'd'       -> sweep 0 -> 180, pause, shake to knock the item loose, sweep back to 0,
 //                green LED blinks 3 times, then "ok"
 //   'x'       -> red LED on for 3s (already served), no reply
+//   'g'       -> blink the green LED 3 times (wiring check), no servo, replies "green"
 //   sensor    -> "near" when something is within 80cm for 0.5s,
 //                "away" when nothing is within 80cm for 3s
 //                "nosensor" once at boot if the sensor never echoes (not wired?),
@@ -86,6 +87,17 @@ void shake() {
       delay(SHAKE_STEP_MS);
     }
     delay(SHAKE_PAUSE_MS);
+    wdt_reset();
+  }
+}
+
+// Wiring check: green LED only, nothing else moves.
+void blinkGreen() {
+  for (int i = 0; i < GREEN_BLINKS; i++) {
+    digitalWrite(GREEN_LED, HIGH);
+    delay(BLINK_MS * 2);
+    digitalWrite(GREEN_LED, LOW);
+    delay(BLINK_MS * 2);
     wdt_reset();
   }
 }
@@ -179,6 +191,9 @@ void loop() {
     } else if (c == 'x') {
       digitalWrite(RED_LED, HIGH);
       redOffAt = millis() + RED_ON_MS;
+    } else if (c == 'g') {
+      blinkGreen();
+      Serial.println("green");
     }
   }
 
