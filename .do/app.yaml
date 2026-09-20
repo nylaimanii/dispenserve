@@ -37,6 +37,9 @@ services:
       - key: FORECAST_WINDOW_HOURS
         scope: RUN_TIME
         value: "3"
+      - key: GEMINI_API_KEY          # only used by GET /ask, over anonymous aggregates
+        scope: RUN_TIME
+        type: SECRET
       - key: SOLANA_LEDGER_ADDRESSES  # comma-separated devnet wallet addresses of the machines
         scope: RUN_TIME
         value: "AmEVPvxvZx4PgJCSjZtSEhU3PT9xCfbgNKqzEN1A9xFN"
