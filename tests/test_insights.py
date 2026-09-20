@@ -90,3 +90,21 @@ def test_slow_bay_does_not_quote_huge_hour_counts():
     snapshot = {"local_time": "11:58", "bays": [{"name": "Kit Kat", "items_left": 22, "capacity": 24}],
                 "dispensed_per_hour_today": {"08:00": 0, "09:00": 1, "10:00": 0, "11:00": 1}, "unique_people_today": 2}
     assert "No restock needed today" in I.rule_based(snapshot)
+
+
+def test_failed_gemini_is_retried_within_a_minute(monkeypatch):
+    app, _ = busy_app()
+    monkeypatch.setattr(I, "FAILED_CACHE_SECONDS", 60)
+    calls = []
+
+    def flaky(url, headers, body):
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError("503")
+        return {"candidates": [{"content": {"parts": [{"text": "Restock Kit Kat after lunch. It is going fast."}]}}]}
+
+    ins = I.Insights(app.app_state, api_key="k", transport=flaky, cache_seconds=600)
+    ins.get(); time.sleep(0.3)               # first refresh fails (it retries twice inside)
+    assert ins.get()["source"] == "rules"
+    # the failed answer is only held for FAILED_CACHE_SECONDS, not the full 10 minutes
+    assert ins._fetched_at <= time.monotonic() - (600 - 60) + 1

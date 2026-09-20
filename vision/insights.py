@@ -21,6 +21,7 @@ import urllib.request
 log = logging.getLogger("dispenserve.insights")
 
 CACHE_SECONDS = 10 * 60
+FAILED_CACHE_SECONDS = 60  # after a Gemini failure, try again soon instead of holding the estimate
 DEFAULT_MODEL = "gemini-flash-latest"
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 RATE_WINDOW_HOURS = 3
@@ -138,11 +139,14 @@ class Insights:
                 log.warning("insights: Gemini attempt %d failed (%s)", attempt, e)
                 if attempt == 1:
                     time.sleep(2)
-        if result is None:
-            log.warning("insights: using the rule-based estimate")
+        failed = result is None
+        if failed:
+            log.warning("insights: using the rule-based estimate, retrying Gemini in %ds", FAILED_CACHE_SECONDS)
             result = self._result(rule_based(snapshot), "rules")
         with self._lock:
-            self._cached, self._fetched_at, self._refreshing = result, time.monotonic(), False
+            # a failed attempt only holds the card briefly, so the demo recovers on its own
+            age = self.cache_seconds - FAILED_CACHE_SECONDS if failed else 0
+            self._cached, self._fetched_at, self._refreshing = result, time.monotonic() - max(0, age), False
 
     @staticmethod
     def _result(text, source):
