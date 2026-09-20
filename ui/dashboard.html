@@ -61,6 +61,24 @@
   .state{ display:inline-flex; align-items:center; gap:5px; font-size:13px; white-space:nowrap; }
   .state.warning{ color:var(--warning); } .state.critical{ color:var(--critical); } .state.good{ color:var(--dim); }
 
+  .cols-4{ grid-template-columns:repeat(4,1fr); }
+  .impact .n{ color:var(--amber); }
+  .heatmap{ display:flex; gap:3px; align-items:flex-end; height:74px; }
+  .heat-cell{ flex:1; border-radius:3px; background:var(--track); position:relative; height:100%; }
+  .heat-cell span{ position:absolute; inset:auto 0 0 0; border-radius:3px; background:var(--amber); }
+  .heat-labels{ display:flex; gap:3px; margin-top:6px; }
+  .heat-labels div{ flex:1; text-align:center; font-size:10px; color:var(--faint); }
+  .ask-row{ display:flex; gap:10px; }
+  .ask-input{
+    flex:1; background:var(--bg); border:1px solid var(--line); border-radius:9px;
+    color:var(--ink); padding:11px 14px; font-size:15px; font-family:inherit;
+  }
+  .ask-input:focus{ outline:none; border-color:var(--amber); }
+  .ask-btn{
+    background:var(--amber); color:#151208; border:none; border-radius:9px; padding:11px 20px;
+    font-size:15px; font-weight:600; font-family:inherit; cursor:pointer;
+  }
+  .ask-btn:disabled{ opacity:.5; cursor:default; }
   .chart{ width:100%; height:190px; display:block; }
   .chart .bar{ fill:var(--amber); opacity:.85; }
   .chart .bar:hover{ opacity:1; }
@@ -73,6 +91,7 @@
   .empty{ color:var(--dim); font-size:14px; padding:18px 0; }
   .note{ font-size:12.5px; color:var(--faint); margin-top:10px; }
   footer{ font-size:13px; color:var(--faint); border-top:1px solid var(--line); padding-top:16px; line-height:1.6; }
+  @media (max-width:900px){ .cols-4{ grid-template-columns:1fr 1fr; } }
   @media (max-width:760px){ .cols-3,.cols-2{ grid-template-columns:1fr; } .hide-sm{ display:none; } }
 </style>
 </head>
@@ -85,6 +104,18 @@
       <span class="pill"><span id="liveDot" class="dot"></span><span id="liveText">Connecting…</span></span>
     </div>
   </header>
+
+  <section class="impact">
+    <h2>Impact</h2>
+    <div class="grid cols-4">
+      <div class="card tile"><div class="n" id="peopleToday">—</div><div class="l">People served today</div></div>
+      <div class="card tile"><div class="n" id="peopleAll">—</div><div class="l">People served, all time</div><div class="sub" id="sinceWhen"></div></div>
+      <div class="card tile"><div class="n" id="daysServing">—</div><div class="l">Days the machine served someone</div></div>
+      <div class="card tile"><div class="n" id="restocks">—</div><div class="l">Restocks by volunteers</div>
+        <div class="sub"><a id="chainLink" href="https://explorer.solana.com/address/AmEVPvxvZx4PgJCSjZtSEhU3PT9xCfbgNKqzEN1A9xFN?cluster=devnet" target="_blank" rel="noopener">Verify on-chain ↗</a></div></div>
+    </div>
+    <div class="note" id="impactNote">Counts only. No names, faces or images exist anywhere in this pipeline.</div>
+  </section>
 
   <div id="alerts" class="alerts"></div>
 
@@ -106,6 +137,27 @@
     <div class="card">
       <h2>Inventory</h2>
       <table><tbody id="bays"><tr><td class="empty">Waiting for data…</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Demand by hour <span class="tag-chip">Tiger Data</span></h2>
+    <div class="card">
+      <div id="heatmap" class="heatmap"></div>
+      <div class="note" id="heatNote">Hourly buckets from the Tiger Data continuous aggregate.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Ask about this machine <span class="tag-chip">Gemini</span></h2>
+    <div class="card">
+      <form id="askForm" class="ask-row" autocomplete="off">
+        <input id="askInput" class="ask-input" type="text" maxlength="200"
+               placeholder="e.g. when should I restock tomorrow?" aria-label="Ask about this machine" />
+        <button class="ask-btn" type="submit">Ask</button>
+      </form>
+      <p class="insight" id="askAnswer" style="margin-top:14px"></p>
+      <div class="note">Answered from anonymous counts only. There is no personal data in the database to ask about.</div>
     </div>
   </section>
 
@@ -145,7 +197,10 @@
 <script>
   const params = new URLSearchParams(location.search);
   const MACHINE = params.get("machine") ?? "";                       // same origin when served by the laptop
-  const FLEET = (params.get("fleet") || "").replace(/\/$/, "");       // public DigitalOcean fleet API
+  const FLEET_PARAM = params.get("fleet");
+  const FLEET = (FLEET_PARAM || "").replace(/\/$/, "");              // public DigitalOcean fleet API
+  // Served by the fleet API itself (not the laptop on :8000)? Then talk to this same origin.
+  const FLEET_READY = !!FLEET_PARAM || location.port !== "8000";
   const LOW = 3;
 
   const $ = id => document.getElementById(id);
@@ -267,7 +322,7 @@
 
   // ---- fleet API (public, aggregate only) --------------------------------------
   every(15000, async () => {
-    if (!FLEET){ $("fleetNote").textContent = "Add ?fleet=<fleet-api-url> to see every machine."; return; }
+    if (!FLEET_READY){ $("fleetNote").textContent = "Add ?fleet=<fleet-api-url> to see every machine."; return; }
     try {
       const [fleet, forecast] = await Promise.all([getJSON(FLEET + "/fleet"), getJSON(FLEET + "/forecast")]);
       const fc = new Map((forecast.bays || []).map(f => [f.machine_id + "|" + f.bay, f]));
@@ -312,6 +367,51 @@
     }
   });
 
+  // ---- impact strip (Bloomberg) + demand heatmap (Tiger Data) ---------------------
+  every(20000, async () => {
+    if (!FLEET_READY) return;
+    try {
+      const i = await getJSON(FLEET + "/impact");
+      $("peopleToday").textContent = i.people_today ?? "—";
+      $("peopleAll").textContent = i.people_all_time ?? "—";
+      $("daysServing").textContent = i.days_serving ?? "—";
+      $("restocks").textContent = i.restocks ?? "—";
+      $("sinceWhen").textContent = i.first_event ? `since ${String(i.first_event).slice(0, 10)}` : "";
+      $("impactNote").textContent = i.repeat_visits_turned_away
+        ? `${i.repeat_visits_turned_away} repeat visits were politely turned away, so the items went further. Counts only: no names, faces or images exist anywhere in this pipeline.`
+        : "Counts only. No names, faces or images exist anywhere in this pipeline.";
+    } catch (e){ /* keep the last numbers */ }
+
+    try {
+      const h = await getJSON(FLEET + "/hourly?hours=24");
+      const totals = new Map();
+      for (const b of h.buckets || []) totals.set(b.hour, (totals.get(b.hour) || 0) + b.dispensed);
+      const rows = [...totals.entries()].sort();
+      const max = Math.max(1, ...rows.map(r => r[1]));
+      $("heatmap").innerHTML = rows.map(([hour, n]) =>
+        `<div class="heat-cell" title="${esc(hour.slice(11,16))} — ${n} dispensed">
+           <span style="height:${Math.round(n / max * 100)}%; opacity:${0.35 + 0.65 * (n / max)}"></span></div>`).join("");
+      $("heatNote").textContent = rows.length
+        ? `Last ${rows.length} hourly buckets from the Tiger Data continuous aggregate. Busiest: ${rows.reduce((a,b)=>b[1]>a[1]?b:a)[0].slice(11,16)}.`
+        : "No hourly data yet.";
+    } catch (e){ /* leave the heatmap as it was */ }
+  });
+
+  // ---- ask about this machine (Gemini, aggregates only) ---------------------------
+  document.getElementById("askForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const q = document.getElementById("askInput").value.trim();
+    const btn = document.querySelector(".ask-btn");
+    if (!q || !FLEET_READY){ $("askAnswer").textContent = FLEET_READY ? "" : "Needs the fleet API."; return; }
+    btn.disabled = true; $("askAnswer").textContent = "Thinking…";
+    try {
+      const r = await getJSON(FLEET + "/ask?q=" + encodeURIComponent(q));
+      $("askAnswer").textContent = r.answer + (r.source === "numbers" ? "  (from the numbers)" : "");
+    } catch (err){
+      $("askAnswer").textContent = "Couldn't reach the fleet API just now.";
+    } finally { btn.disabled = false; }
+  });
+
   // ---- restock insight (machine only: Gemini runs on the laptop) -----------------
   every(60000, async () => {
     try {
@@ -329,7 +429,7 @@
 
   // ---- donor ledger --------------------------------------------------------------
   every(30000, async () => {
-    if (!FLEET) return;
+    if (!FLEET_READY) return;
     try {
       const l = await getJSON(FLEET + "/ledger");
       const rows = l.records || [];

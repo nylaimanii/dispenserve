@@ -20,28 +20,67 @@ from pathlib import Path
 
 log = logging.getLogger("dispenserve.voice")
 
+# Fixed, generic lines. Spoken aloud so the machine works for someone who can't read the
+# screen, a kid, or anyone who'd rather not squint at an iPad. Spanish is included because
+# the people a free food table needs to reach are not all English-first.
 LINES = {
-    "scanning": [
-        "Hold still for a sec.",
-        "Just a second, hold still.",
-        "Hold still, almost there.",
-    ],
-    "dispensed": [
-        "Here you go, have a good one.",
-        "Here you go. Enjoy!",
-        "There you go, have a great day.",
-    ],
-    "already_served": [
-        "You've already got yours today. Come back tomorrow.",
-        "Looks like you've had yours today. See you tomorrow!",
-        "You're all set for today. Come back tomorrow.",
-    ],
-    "goodbye": [
-        "See you tomorrow, thanks for stopping by.",
-        "Thanks for stopping by. See you tomorrow!",
-        "Take care, see you tomorrow.",
-    ],
+    "en": {
+        "scanning": [
+            "Hold still for a sec.",
+            "Just a second, hold still.",
+            "Hold still, almost there.",
+        ],
+        "dispensed": [
+            "Here you go, have a good one.",
+            "Here you go. Enjoy!",
+            "There you go, have a great day.",
+        ],
+        "already_served": [
+            "You've already got yours today. Come back tomorrow.",
+            "Looks like you've had yours today. See you tomorrow!",
+            "You're all set for today. Come back tomorrow.",
+        ],
+        "goodbye": [
+            "See you tomorrow, thanks for stopping by.",
+            "Thanks for stopping by. See you tomorrow!",
+            "Take care, see you tomorrow.",
+        ],
+        "low_stock": [
+            "Heads up: this machine is running low and needs a refill.",
+            "Volunteer note: only a few items left in this machine.",
+            "Running low here. Time for a restock.",
+        ],
+    },
+    "es": {
+        "scanning": [
+            "Quédate quieto un segundo.",
+            "Un segundo, no te muevas.",
+            "No te muevas, ya casi está.",
+        ],
+        "dispensed": [
+            "Aquí tienes, que te vaya bien.",
+            "Aquí tienes. ¡Que lo disfrutes!",
+            "Listo, que tengas un buen día.",
+        ],
+        "already_served": [
+            "Ya recogiste el tuyo hoy. Vuelve mañana.",
+            "Parece que ya tomaste el tuyo hoy. ¡Hasta mañana!",
+            "Ya estás listo por hoy. Vuelve mañana.",
+        ],
+        "goodbye": [
+            "Hasta mañana, gracias por pasar.",
+            "Gracias por pasar. ¡Hasta mañana!",
+            "Cuídate, nos vemos mañana.",
+        ],
+        "low_stock": [
+            "Atención: esta máquina se está quedando sin productos.",
+            "Nota para el voluntario: quedan pocos productos.",
+            "Quedan pocos. Hay que reabastecer.",
+        ],
+    },
 }
+LANGUAGES = tuple(LINES)
+KINDS = tuple(LINES["en"])
 
 AUDIO_DIR = Path(__file__).resolve().parent / "audio"
 API_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128"
@@ -51,6 +90,7 @@ API_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=
 DEFAULT_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"
 DEFAULT_MODEL = "eleven_multilingual_v2"
 SAY_VOICE = "Samantha"
+SAY_VOICE_BY_LANG = {"en": "Samantha", "es": "Paulina"}  # macOS fallback voices
 SCANNING_GAP_S = 8.0  # don't repeat "hold still" on every restarted hold
 
 
@@ -76,7 +116,8 @@ def system_player(args):
 
 class Voice:
     def __init__(self, api_key=None, voice_id=DEFAULT_VOICE_ID, model=DEFAULT_MODEL, audio_dir=AUDIO_DIR,
-                 mute=False, synth=elevenlabs_tts, player=system_player):
+                 mute=False, synth=elevenlabs_tts, player=system_player, language="en"):
+        self.language = language if language in LINES else "en"
         self.api_key = api_key
         self.voice_id = voice_id
         self.model = model
@@ -101,30 +142,39 @@ class Voice:
             return
         threading.Thread(target=self._generate_missing, name="voice-cache", daemon=True).start()
 
+    def set_language(self, language):
+        """Switch spoken language. Unknown codes are ignored, so the kiosk can't break the voice."""
+        if language in LINES and language != self.language:
+            self.language = language
+            log.info("voice: language set to %s", language)
+        return self.language
+
     def _generate_missing(self):
         made = 0
-        for kind, texts in LINES.items():
-            for i, text in enumerate(texts):
-                path = clip_path(self.audio_dir, kind, i, text, self.voice_id, self.model)
-                if path.exists():
-                    continue
-                try:
-                    audio = self.synth(self.api_key, self.voice_id, self.model, text)
-                    self.audio_dir.mkdir(parents=True, exist_ok=True)
-                    tmp = path.with_suffix(".part")
-                    tmp.write_bytes(audio)
-                    tmp.replace(path)
-                    made += 1
-                except Exception as e:
-                    log.warning("voice: ElevenLabs failed for %r (%s); using macOS say for now", text, e)
-                    return
+        for lang, kinds in LINES.items():
+            for kind, texts in kinds.items():
+                for i, text in enumerate(texts):
+                    path = clip_path(self.audio_dir, f"{lang}_{kind}", i, text, self.voice_id, self.model)
+                    if path.exists():
+                        continue
+                    try:
+                        audio = self.synth(self.api_key, self.voice_id, self.model, text)
+                        self.audio_dir.mkdir(parents=True, exist_ok=True)
+                        tmp = path.with_suffix(".part")
+                        tmp.write_bytes(audio)
+                        tmp.replace(path)
+                        made += 1
+                    except Exception as e:
+                        log.warning("voice: ElevenLabs failed for %r (%s); using macOS say for now", text, e)
+                        return
         if made:
             log.info("voice: generated %d ElevenLabs clips in %s", made, self.audio_dir)
 
-    def say(self, kind):
-        """Speak one of the fixed lines: scanning, dispensed, already_served, goodbye."""
-        if kind not in LINES:
+    def say(self, kind, language=None):
+        """Speak one of the fixed lines: scanning, dispensed, already_served, goodbye, low_stock."""
+        if kind not in KINDS:
             raise ValueError(f"unknown line {kind!r}")
+        lang = language if language in LINES else self.language
         if self.mute:
             return None
         now = time.monotonic()
@@ -132,17 +182,17 @@ class Voice:
             if now - self._last_scanning < SCANNING_GAP_S:
                 return None
             self._last_scanning = now
-        texts = LINES[kind]
+        texts = LINES[lang][kind]
         choices = [i for i in range(len(texts)) if i != self._last_index.get(kind)] or [0]
         index = random.choice(choices)
         self._last_index[kind] = index
         text = texts[index]
 
-        path = clip_path(self.audio_dir, kind, index, text, self.voice_id, self.model)
+        path = clip_path(self.audio_dir, f"{lang}_{kind}", index, text, self.voice_id, self.model)
         if path.exists() and self._has_afplay:
             args = ["afplay", str(path)]
         elif self._has_say:
-            args = ["say", "-v", SAY_VOICE, text]
+            args = ["say", "-v", SAY_VOICE_BY_LANG.get(lang, SAY_VOICE), text]
         else:
             log.info("voice (no audio player): %s", text)
             return text

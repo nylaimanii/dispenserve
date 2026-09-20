@@ -5,6 +5,8 @@ nothing about people in the database, so there is nothing about people to serve.
 
     GET /fleet     every machine: items left per bay, dispensed today, last seen
     GET /forecast  per bay: estimated run-out time from the last few hours' dispense rate
+    GET /impact    headline impact numbers: people served today and all time, restocks
+    GET /ask       one plain-English question answered from the aggregates only (Gemini)
     GET /hourly    dispensed per bay per hour (from the continuous aggregate), for charts
     GET /ledger    public donor ledger: restocks and daily totals from Solana devnet memos
     GET /health
@@ -24,8 +26,9 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
+from ask import answer_question
 from fleet import build_fleet, build_forecast
 from ledger_reader import DEVNET_RPC, LedgerReader, example_records
 from sources import FakeSource, TigerSource
@@ -110,6 +113,32 @@ def create_app(fake=None):
             "bays": build_forecast(machines, cfg["capacity"], now, cfg["window_hours"]),
         }
 
+    @app.get("/impact")
+    def impact():
+        now = datetime.datetime.now(datetime.timezone.utc)
+        today_start = datetime.datetime.combine(now.astimezone(tz).date(), datetime.time(), tz)
+        try:
+            numbers = source.impact(now, today_start)
+        except Exception as e:
+            return unavailable(e)
+        return {"generated_at": now.isoformat(timespec="seconds"), "source": source.name, **numbers}
+
+    @app.get("/ask")
+    def ask(q: str = ""):
+        """Answers from the anonymous aggregates only. No personal data exists to leak."""
+        now = datetime.datetime.now(datetime.timezone.utc)
+        today_start = datetime.datetime.combine(now.astimezone(tz).date(), datetime.time(), tz)
+        try:
+            machines = source.machines(now, today_start, cfg["window_hours"])
+            facts = {
+                "impact": source.impact(now, today_start),
+                "machines": build_fleet(machines, cfg["capacity"], now),
+                "forecast": build_forecast(machines, cfg["capacity"], now, cfg["window_hours"]),
+            }
+        except Exception as e:
+            return unavailable(e)
+        return answer_question(q, facts, os.environ.get("GEMINI_API_KEY", "").strip() or None)
+
     @app.get("/hourly")
     def hourly(hours: int = 24):
         hours = max(1, min(hours, 72))
@@ -135,6 +164,14 @@ def create_app(fake=None):
                     "note": "example records; set SOLANA_LEDGER_ADDRESSES to read the real devnet ledger"}
         return {"generated_at": now.isoformat(timespec="seconds"), "source": "none", "records": [],
                 "note": "set SOLANA_LEDGER_ADDRESSES to the machines' devnet wallet addresses"}
+
+    # The dashboard is served from here too, so judges need one public URL and the page
+    # talks to this same origin (no query string, no CORS, no mixed content).
+    dashboard = Path(__file__).resolve().parent / "static" / "index.html"
+    if dashboard.exists():
+        @app.get("/")
+        def home():
+            return FileResponse(dashboard)
 
     return app
 

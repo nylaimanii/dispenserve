@@ -245,4 +245,5 @@ def test_every_integration_together_sends_no_face_data():
         for decimals in (3, 4, 6):
             assert f"{person[0]:.{decimals}f}" not in blob
             assert f"{person[1]:.{decimals}f}" not in blob
-    assert all(args[3] in {t for texts in voice_mod.LINES.values() for t in texts} for args in spoken)
+    fixed_lines = {t for lang in voice_mod.LINES.values() for texts in lang.values() for t in texts}
+    assert all(args[3] in fixed_lines for args in spoken)  # only ever the fixed lines, in any language

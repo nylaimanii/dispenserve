@@ -42,7 +42,7 @@ from ledger import SolanaLedger
 from metrics import Metrics
 from serial_link import Dispenser
 from server import PORT, start_server
-from state import ALREADY_SERVED, DISPENSED, IDLE, SCANNING, SLEEP, AppState
+from state import ALREADY_SERVED, DISPENSED, IDLE, LOW_STOCK, SCANNING, SLEEP, AppState
 from telemetry import Telemetry, build_sinks
 from voice import DEFAULT_MODEL as VOICE_MODEL
 from voice import DEFAULT_VOICE_ID, Voice
@@ -217,6 +217,8 @@ class Dispenserve:
         remaining = self.app_state.record_dispense(new_person)
         self.app_state.set_item(self.app_state.bay_name)
         self._show_result(DISPENSED)
+        if 0 < remaining <= LOW_STOCK:
+            self._say("low_stock")  # volunteers hear it; _say swallows any error
         self._last_dispense_at = time.monotonic()
         self._emit("dispensed")
         if remaining == 0:
@@ -256,6 +258,14 @@ class Dispenserve:
         if self._last_dispense_at and time.monotonic() - self._last_dispense_at < GOODBYE_WITHIN_S:
             self._say("goodbye")
         self._last_dispense_at = 0.0
+
+    def set_language(self, language):
+        """Kiosk language toggle. Never raises: an unknown code just keeps the current one."""
+        try:
+            return self.voice.set_language(language) if self.voice is not None else "en"
+        except Exception:
+            log.exception("language switch failed")
+            return "en"
 
     def _say(self, kind):
         if self.voice is not None:

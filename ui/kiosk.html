@@ -55,9 +55,13 @@
   .stage{
     position: relative; z-index: 2;
     display:flex; flex-direction:column; align-items:center; gap: 5.5vh;
-    transition: opacity 1000ms ease, transform 1000ms cubic-bezier(.2,.7,.2,1);
+    /* waking: wait for the sleep layer to clear before fading in, so the two never overlap */
+    transition: opacity 400ms ease 420ms, transform 600ms cubic-bezier(.2,.7,.2,1) 420ms;
   }
-  body.asleep .stage{ opacity: 0; transform: scale(0.94); }
+  body.asleep .stage{
+    opacity: 0; transform: scale(0.94);
+    transition: opacity 380ms ease 0ms, transform 500ms ease 0ms;
+  }
 
   .ring-wrap{ position: relative; width: 48vh; height: 48vh; }
   .ring-wrap svg{ width:100%; height:100%; transform: rotate(-90deg); display:block; overflow: visible; }
@@ -108,9 +112,12 @@
   @keyframes draw{ to { stroke-dashoffset: 0; } }
 
   .copy{ text-align:center; }
+  .copy{ min-height: 17vh; }                    /* reserved space: the ring never jumps */
+  .copy.swapping{ opacity: 0; }
+  .copy{ transition: opacity 160ms ease; }
   .caption{
     font-size: 6.2vh; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1;
-    margin: 0; transition: opacity 500ms ease;
+    margin: 0;
   }
   .subcaption{
     font-size: 3.2vh; font-weight: 400; color: var(--ink-dim);
@@ -124,9 +131,9 @@
     position: fixed; inset: 0; z-index: 3;
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap: 4vh;
     opacity: 0; pointer-events: none;
-    transition: opacity 1000ms ease;
+    transition: opacity 380ms ease 0ms;          /* waking: clear out first */
   }
-  body.asleep .sleep{ opacity: 1; }
+  body.asleep .sleep{ opacity: 1; transition: opacity 400ms ease 420ms; }
   .logo{ display:flex; flex-direction:column; align-items:center; gap: 3.5vh; animation: breathe 5s ease-in-out infinite; }
   .logo svg{ width: 15vh; height: 15vh; }
   .logo .disc{ fill:none; stroke: var(--amber); stroke-width: 5; }
@@ -136,7 +143,7 @@
   @keyframes breathe{ 0%,100%{ opacity: 0.32; } 50%{ opacity: 1; } }
 
   .timer{
-    position:absolute; left: 50%; bottom: -8.2vh; transform: translateX(-50%);
+    position:absolute; left: 50%; bottom: 22%; transform: translateX(-50%);
     font-size: 2.4vh; letter-spacing: 0.14em; text-transform: uppercase;
     color: #a8a49a; font-variant-numeric: tabular-nums; text-shadow: 0 0 16px rgba(0,0,0,.8);
     opacity: 0; transition: opacity 500ms ease;
@@ -148,6 +155,16 @@
     border: 1px solid rgba(255,255,255,0.08); border-radius: 999px;
     padding: 0.9vh 1.8vh; background: rgba(255,255,255,0.02);
   }
+  .lang{
+    position: fixed; right: 3vh; top: 3vh; z-index: 5; display:flex;
+    border: 1px solid rgba(255,255,255,0.1); border-radius: 999px; overflow: hidden;
+    background: rgba(255,255,255,0.02);
+  }
+  .lang button{
+    background: none; border: none; color: #6b6860; font: inherit; font-size: 2vh;
+    letter-spacing: .08em; padding: 0.9vh 2vh; cursor: pointer;
+  }
+  .lang button.on{ background: rgba(232,182,87,.14); color: var(--accent); }
   .dot{
     position:fixed; bottom: 2.6vh; right: 2.6vh; z-index: 4;
     width: 9px; height:9px; border-radius: 50%;
@@ -197,13 +214,16 @@
       </div>
       <div id="timer" class="timer"></div>
     </div>
-    <div class="copy">
+    <div class="copy" id="copy">
       <div id="caption" class="caption">Step up.</div>
       <div id="subcaption" class="subcaption"></div>
     </div>
   </div>
 
-  <div class="badge">no photos. no names. forgets you in 24h.</div>
+  <div class="badge" id="badge">no photos. no names. forgets you in 24h.</div>
+  <div class="lang" id="lang" role="group" aria-label="Language">
+    <button type="button" data-lang="en" class="on">EN</button><button type="button" data-lang="es">ES</button>
+  </div>
   <div id="dot" class="dot"></div>
 
 <script>
@@ -218,6 +238,25 @@
   const mark = document.getElementById("mark");
   const markPath = document.getElementById("markPath");
   const caption = document.getElementById("caption");
+  const copy = document.getElementById("copy");
+  let copyTimer = null;
+
+  // Never show two headlines at once: fade the block out, swap the words, fade it back in.
+  function setCopy(headline, sub, item){
+    clearTimeout(copyTimer);
+    copy.classList.add("swapping");
+    copyTimer = setTimeout(() => {
+      caption.textContent = headline;
+      if (item !== null && item !== undefined){
+        subcaption.innerHTML = '<span class="pre"></span><span class="item"></span>';
+        subcaption.querySelector(".pre").textContent = COPY[lang].dispensed[1];
+        subcaption.querySelector(".item").textContent = item;
+      } else {
+        subcaption.textContent = sub || "";
+      }
+      copy.classList.remove("swapping");
+    }, 170);
+  }
   const subcaption = document.getElementById("subcaption");
   const edge = document.getElementById("edge");
   const dot = document.getElementById("dot");
@@ -232,7 +271,29 @@
   let failCount = 0;
 
   const CHECK = "M26 52 L44 70 L76 32";
-  const DASH  = "M30 50 L70 50";
+
+  // On-screen copy per language. The spoken lines live separately in vision/voice.py.
+  const COPY = {
+    en: {
+      idle: ["Step up.", "One snack per person, per day."],
+      scanning: ["Hold still.", "Nothing about your face is saved."],
+      dispensed: ["Take it.", "Enjoy your "],
+      already_served: ["You've already got yours today.", "Come back tomorrow."],
+      hint: "Free snacks. Walk up to start.",
+      badge: "no photos. no names. forgets you in 24h.",
+      timer: "time here",
+    },
+    es: {
+      idle: ["Acércate.", "Un snack por persona, por día."],
+      scanning: ["No te muevas.", "No se guarda nada de tu cara."],
+      dispensed: ["Tómalo.", "Disfruta tu "],
+      already_served: ["Ya recogiste el tuyo hoy.", "Vuelve mañana."],
+      hint: "Snacks gratis. Acércate para empezar.",
+      badge: "sin fotos. sin nombres. te olvida en 24h.",
+      timer: "tiempo aquí",
+    },
+  };
+  let lang = "en";
 
   // Colors and glow strength per state. The aurora eases toward these.
   const LOOKS = {
@@ -383,7 +444,7 @@
     drawAurora(t);
     drawGrid(t);
     if (present){                          // ticks locally between polls so it reads smoothly
-      timer.textContent = `time here: ${(presentFor + (performance.now() - presentSyncedAt) / 1000).toFixed(1)}s`;
+      timer.textContent = `${COPY[lang].timer}: ${(presentFor + (performance.now() - presentSyncedAt) / 1000).toFixed(1)}s`;
       timer.classList.add("show");
     } else {
       timer.classList.remove("show");
@@ -448,6 +509,7 @@
       currentState = "sleep";
       return;
     }
+    if (data && data.item) lastItem = data.item;
     if (state === currentState){
       if (state === "dispensed") setItem(data && data.item);
       return;
@@ -464,16 +526,14 @@
     if (state === "idle"){
       progress.style.strokeDashoffset = CIRC;
       scanProgress = 0;
-      caption.textContent = "Step up.";
-      subcaption.textContent = "One snack per person, per day.";
+      setCopy(...COPY[lang].idle);
     }
     else if (state === "scanning"){
       progress.style.strokeDashoffset = CIRC;
       ringStart = performance.now();
       cancelAnimationFrame(ringRAF);
       ringRAF = requestAnimationFrame(animateRing);
-      caption.textContent = "Hold still.";
-      subcaption.textContent = "Nothing about your face is saved.";
+      setCopy(...COPY[lang].scanning);
     }
     else if (state === "dispensed"){
       progress.style.strokeDashoffset = 0;
@@ -481,22 +541,36 @@
       markPath.setAttribute("d", CHECK);
       mark.classList.add("show");
       playBurst();
-      caption.textContent = "Take it.";
-      setItem(data && data.item);
+      setCopy(COPY[lang].dispensed[0], null, (data && data.item) || lastItem || "");
     }
     else if (state === "already_served"){
       progress.style.opacity = 0;
-      markPath.setAttribute("d", DASH);
-      mark.classList.add("show");
-      caption.textContent = "You've already got yours today.";
-      subcaption.textContent = "Come back tomorrow.";
+      setCopy(...COPY[lang].already_served);
     }
   }
+
+  let lastItem = "";
 
   function setItem(item){
     subcaption.innerHTML = item ? `Enjoy your <span class="item"></span>` : "";
     if (item) subcaption.querySelector(".item").textContent = item;
   }
+
+  // ---- Language toggle ---------------------------------------------------------
+  document.getElementById("lang").addEventListener("click", (e) => {
+    const button = e.target.closest("button[data-lang]");
+    if (!button) return;
+    lang = button.dataset.lang;
+    for (const b of document.querySelectorAll("#lang button")) b.classList.toggle("on", b === button);
+    document.documentElement.lang = lang;
+    document.getElementById("badge").textContent = COPY[lang].badge;
+    document.querySelector(".sleep-hint").textContent = COPY[lang].hint;
+    const state = currentState;
+    currentState = null;                       // re-render the current screen in the new language
+    if (state && state !== "sleep") render(state, { item: lastItem, present, present_for: presentFor });
+    // tell the laptop which language to speak; if it's unreachable the screen still switched
+    fetch("/language?set=" + lang, { cache: "no-store" }).catch(() => {});
+  });
 
   // ---- Demo cycle: runs until the real endpoint answers once ------------------
   const DEMO_SEQUENCE = ["sleep", "idle", "scanning", "dispensed", "idle", "scanning", "already_served"];

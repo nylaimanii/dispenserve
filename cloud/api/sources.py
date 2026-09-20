@@ -75,6 +75,33 @@ class TigerSource:
         return list(machines.values())
 
 
+    IMPACT_SQL = """
+        SELECT
+            count(*) FILTER (WHERE event = 'dispensed')                          AS items_all_time,
+            count(*) FILTER (WHERE event = 'dispensed' AND ts >= %(today)s)      AS items_today,
+            count(*) FILTER (WHERE event = 'already_served')                     AS repeat_visits,
+            count(*) FILTER (WHERE event = 'restocked')                          AS restocks,
+            count(DISTINCT machine_id)                                           AS machines,
+            count(DISTINCT date_trunc('day', ts)) FILTER (WHERE event = 'dispensed') AS days_serving,
+            min(ts)                                                              AS first_event
+        FROM events
+    """
+
+    def impact(self, now, today_start):
+        import psycopg
+
+        with psycopg.connect(self.database_url, connect_timeout=5) as conn:
+            row = conn.execute(self.IMPACT_SQL, {"today": today_start}).fetchone()
+        items_all, items_today, repeats, restocks, machines, days, first = row
+        return {
+            "items_today": items_today, "items_all_time": items_all,
+            "people_today": items_today,          # one item per person per day, so these are the same
+            "people_all_time": items_all,
+            "repeat_visits_turned_away": repeats, "restocks": restocks,
+            "machines": machines, "days_serving": days,
+            "first_event": None if first is None else first.astimezone(UTC).isoformat(timespec="seconds"),
+        }
+
     def hourly(self, now, hours):
         import psycopg
 
@@ -124,6 +151,19 @@ class FakeSource:
             if p <= threshold:
                 return k
             k += 1
+
+    def impact(self, now, today_start):
+        machines = self.machines(now, today_start, 3)
+        today = sum(b.dispensed_today for m in machines for b in m.bays)
+        hourly = self.hourly(now, self.HISTORY_HOURS)
+        all_time = sum(b["dispensed"] for b in hourly)
+        return {
+            "items_today": today, "items_all_time": all_time,
+            "people_today": today, "people_all_time": all_time,
+            "repeat_visits_turned_away": round(all_time * 0.22), "restocks": len(self.RESTOCK_HOURS_AGO),
+            "machines": len(self.MACHINES), "days_serving": 2,
+            "first_event": (now - datetime.timedelta(hours=self.HISTORY_HOURS)).isoformat(timespec="seconds"),
+        }
 
     def hourly(self, now, hours):
         current_hour = hour_floor(now)
