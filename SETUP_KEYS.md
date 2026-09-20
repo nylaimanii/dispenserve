@@ -5,7 +5,8 @@ Do these in order. Each one is optional: skip any and that feature falls back (t
 - [ ] **1. Gemini** (2 minutes)
   - Go to https://aistudio.google.com/apikey, sign in with Google, and click **Create API key**. The free tier is plenty for one request every 10 minutes.
   - `.env`: `GEMINI_API_KEY=...`
-  - Check: run the app, open `http://localhost:8000/insights` twice about 5 seconds apart. The second response should say `"source": "gemini"`.
+  - Check: run the app, then poll `http://localhost:8000/insights` for ~15s. The first call answers instantly with `"source": "rules"` while Gemini is asked in the background; once it answers, the source becomes `"gemini"`.
+  - Leave `GEMINI_MODEL` unset. The default `gemini-flash-latest` works; `gemini-2.5-flash` is 404 for new keys ("no longer available to new users").
 
 - [ ] **2. ElevenLabs** (3 minutes)
   - Sign up at https://elevenlabs.io. The coupon for extra credits is in the **HopHacks Discord, #coupon-codes**. The free tier alone covers our 12 lines (under 500 characters).

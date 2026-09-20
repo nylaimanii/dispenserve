@@ -81,7 +81,7 @@ def build_prompt(snapshot):
 
 def http_transport(url, headers, body):
     req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
-    with urllib.request.urlopen(req, timeout=20) as res:
+    with urllib.request.urlopen(req, timeout=30) as res:  # generous: the demo may be on a phone hotspot
         return json.loads(res.read())
 
 
@@ -128,10 +128,18 @@ class Insights:
 
     def _refresh(self):
         snapshot = aggregate_snapshot(self.app_state)
-        try:
-            result = self._result(ask_gemini(self.api_key, self.model, build_prompt(snapshot), self.transport), "gemini")
-        except Exception as e:
-            log.warning("insights: Gemini failed (%s), using the rule-based estimate", e)
+        prompt = build_prompt(snapshot)
+        result = None
+        for attempt in (1, 2):  # a single 503 or slow response shouldn't drop the card to the estimate
+            try:
+                result = self._result(ask_gemini(self.api_key, self.model, prompt, self.transport), "gemini")
+                break
+            except Exception as e:
+                log.warning("insights: Gemini attempt %d failed (%s)", attempt, e)
+                if attempt == 1:
+                    time.sleep(2)
+        if result is None:
+            log.warning("insights: using the rule-based estimate")
             result = self._result(rule_based(snapshot), "rules")
         with self._lock:
             self._cached, self._fetched_at, self._refreshing = result, time.monotonic(), False
