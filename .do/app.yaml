@@ -40,6 +40,9 @@ services:
       - key: GEMINI_API_KEY          # only used by GET /ask, over anonymous aggregates
         scope: RUN_TIME
         type: SECRET
+      - key: GEMINI_MODEL            # free-tier quota is per model, so this is switchable
+        scope: RUN_TIME
+        value: "gemini-3.5-flash"
       - key: SOLANA_LEDGER_ADDRESSES  # comma-separated devnet wallet addresses of the machines
         scope: RUN_TIME
         value: "AmEVPvxvZx4PgJCSjZtSEhU3PT9xCfbgNKqzEN1A9xFN"

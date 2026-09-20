@@ -8,11 +8,13 @@ from the same numbers with plain arithmetic, so the dashboard never breaks.
 
 import json
 import logging
+import os
 import urllib.request
 
 log = logging.getLogger("fleet.ask")
 
-MODEL = "gemini-flash-latest"
+# per-model daily quota on the free tier, so the model is configurable
+MODEL = os.environ.get("GEMINI_MODEL", "").strip() or "gemini-flash-latest"
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 MAX_QUESTION = 300
 
