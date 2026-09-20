@@ -56,7 +56,7 @@ SAME_FACE_MIN_SIM = 0.3  # a face swap mid-hold restarts the hold
 FAKE_SCAN_INTERVAL_S = 10.0
 GOODBYE_WITHIN_S = 90.0  # say goodbye if they leave within this long of getting an item
 NOT_LIVE = "not_live"
-CAMERA_INDEXES = [1, 0]  # external usb webcam first, then the built-in camera
+CAMERA_INDEXES = [1, 0]  # fallback order when CAMERA_INDEX isn't set: external usb webcam, then built-in
 
 
 class HoldTracker:
@@ -362,8 +362,11 @@ def open_camera(indexes):
 
     for index in indexes:
         cap = cv2.VideoCapture(index)
-        if cap.isOpened() and cap.read()[0]:
-            log.info("using camera index %d", index)
+        ok, frame = (False, None)
+        if cap.isOpened():
+            ok, frame = cap.read()
+        if ok:
+            log.info("using camera index %d (%dx%d)", index, frame.shape[1], frame.shape[0])
             return cap
         cap.release()
     return None
@@ -553,7 +556,7 @@ def main(argv=None):
     parser.add_argument("--mute", action="store_true", help="no spoken lines at all")
     parser.add_argument("--flush-solana", action="store_true", help="ask the running app to write today's total to Solana, then exit")
     parser.add_argument("--liveness", action="store_true", help="reject scans that fail the anti-spoof check (default: log only)")
-    parser.add_argument("--camera", type=int, help="camera index (default: try 1, then 0)")
+    parser.add_argument("--camera", type=int, help="camera index (default: CAMERA_INDEX from .env, else try 1 then 0)")
     parser.add_argument("--det-size", type=int, default=640, help="face detector input size")
     parser.add_argument("--port", type=int, default=PORT)
     args = parser.parse_args(argv)
@@ -598,7 +601,8 @@ def main(argv=None):
             threading.Thread(target=read_stdin_keys, args=(disp, stop), daemon=True).start()
             run_fake(disp, stop)
         else:
-            indexes = [args.camera] if args.camera is not None else CAMERA_INDEXES
+            configured = args.camera if args.camera is not None else config.env_int("CAMERA_INDEX", None)
+            indexes = [configured] if configured is not None else CAMERA_INDEXES
             run_camera(disp, indexes, args.det_size)
     except KeyboardInterrupt:
         pass
