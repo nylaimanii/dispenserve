@@ -25,7 +25,9 @@ def build_prompt(question, facts):
         "Answer their question in at most 3 short sentences, using only these anonymous numbers:\n"
         f"{json.dumps(facts, sort_keys=True, default=str)}\n\n"
         f"Question: {question}\n"
-        "If the numbers can't answer it, say so plainly. No markdown, no preamble."
+        "Use the forecast (hours_left, runs_out_at, rate_per_hour) and the impact counts to give the "
+        "best estimate you can, and say what the staff member should do. Only say the numbers can't "
+        "answer if nothing in them is relevant. No markdown, no preamble."
     )
 
 
