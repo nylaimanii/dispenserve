@@ -33,7 +33,7 @@ def build_prompt(question, facts):
 
 def ask_gemini(api_key, prompt, transport=None):
     body = {"contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 512}}
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048}}
     if transport is not None:
         reply = transport(API_URL.format(model=MODEL), {"x-goog-api-key": api_key}, body)
     else:
