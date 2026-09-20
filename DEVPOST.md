@@ -18,13 +18,13 @@ Walk up to the machine. An ultrasonic sensor notices you and the kiosk fades fro
 
 Around the machine:
 
-- **Staff** get an operator dashboard with stock per bay, jam and low-stock alerts, a Gemini-written restock recommendation, and a fleet view. The fleet view shows every machine on campus and a forecast of when each bay runs out.
+- **Staff** get an operator dashboard with stock per bay, a dispensed-per-hour chart, jam and low-stock alerts, a Gemini-written restock recommendation, and a fleet view with a run-out forecast. It's live at [dispenserve-dashboard.vercel.app](https://dispenserve-dashboard.vercel.app).
 - **Donors** get a public ledger on Solana. Every restock and every day's total is written on chain with an explorer link, so they can watch their money turn into snacks. No student ever appears in it.
 - **Students** get a snack without handing over a name, an ID, or a photo.
 
 ## How we built it
 
-**Hardware.** An Arduino Uno runs off a 9V battery. A 9g servo sweeps a slotted disc: each 0→180→0 sweep drops one item. The servo is only attached during the sweep, so it draws no power while idle. An HC-SR04 ultrasonic sensor on the front panel reports `near` (someone within 80 cm for half a second) and `away` (nobody for 3 seconds). A green LED blinks on a dispense and a red LED lights on a repeat visit. The laptop sends `d` and the Arduino sweeps, blinks and answers `ok`. A full cycle takes **4.87 s** (0 misses in [N] consecutive test dispenses). A hardware watchdog resets the board if it ever freezes.
+**Hardware.** An Arduino Uno runs off a 9V battery. A 9g servo sweeps a slotted disc: each 0→180→0 sweep drops one item. The servo is only attached during the sweep, so it draws no power while idle. An HC-SR04 ultrasonic sensor on the front panel reports `near` (someone within 80 cm for half a second) and `away` (nobody for 3 seconds). A green LED blinks on a dispense and a red LED lights on a repeat visit. The laptop sends `d` and the Arduino sweeps, blinks and answers `ok`. A full cycle takes **5.51 s**: sweep out, a 600 ms hold, three quick shakes so the item drops free, then sweep back. Before the shake was added, 20 of 20 consecutive test dispenses answered `ok` in 4.87 s. One earlier run froze the board mid-sweep, so we added a hardware watchdog that resets it within 2 s.
 
 **Privacy by design.**
 - Face vectors live **only in RAM**. They are purged after 24 hours and overwritten with zeros, and they're gone when the app quits.
@@ -37,15 +37,15 @@ Around the machine:
 **Measured performance** (on our laptop's CPU, from `GET /metrics`):
 - **62 ms per frame** with a face in view: detection 36.5 ms and embedding 25.1 ms, over about 1,800 frames.
 - **1.1 ms** from the end of the hold to the decision (p95 1.5 ms).
-- In live testing, the same person's repeat scans matched with **cosine similarity 0.77 to 0.93**, far above the 0.42 threshold. [Across N different people, the highest similarity between two different people was X.]
+- In live testing, one person's 9 repeat scans matched with **cosine similarity 0.59 to 0.93**, all comfortably above the 0.42 threshold, across different angles and distances. Two different faces from a test photo scored **0.06**.
 
-**Anti-spoofing.** A liveness check built from the landmarks insightface already returns. It counts a blink (eye openness dips) or real 3D motion: a photo waved in front of the camera only moves its keypoints in flat 2D, while a real head's nose shifts relative to its eyes. All 10 of our real scans passed, scoring 1.5 and up (1.0 passes); [a phone photo scored X]. It only logs by default, so it can't turn anyone away during a demo.
+**Anti-spoofing.** A liveness check built from the landmarks insightface already returns. It counts a blink (eye openness dips) or real 3D motion: a photo waved in front of the camera only moves its keypoints in flat 2D, while a real head's nose shifts relative to its eyes. All 10 of our real scans passed, scoring 1.49 to 30.95 (1.0 passes), and a still image scores 0.00. We have not tested it against a phone held up to the camera, which is exactly why it only logs by default and can never turn anyone away.
 
-**Fleet telemetry (Tiger Data + Snowflake).** Each event is exactly `{machine_id, bay, event, ts}`. It fans out on background threads to a Tiger Data hypertable, which has an hourly continuous aggregate and retention policies, and to a Snowflake table with a daily-per-bay view. Each destination has its own queue and retry, so one slow service never blocks the other or the camera.
+**Fleet telemetry (Snowflake).** Each event is exactly `{machine_id, bay, event, ts}`, batched on a background thread into a Snowflake table with a `DAILY_BAY_SUMMARY` view: dispensed, repeat visits and restocks per machine, bay and day. The sink layer fans out to any number of destinations, each with its own queue and retry, so one slow service never blocks another or the camera.
 
-**Fleet API (DigitalOcean).** FastAPI on App Platform serves `/fleet` (stock and last-seen time per machine), `/forecast` and `/ledger`. The forecast is plain arithmetic: *items left ÷ items per hour over the last 3 hours*.
+**Fleet API.** A FastAPI service serves `/fleet` (stock and last-seen per machine), `/forecast`, `/hourly` and `/ledger`. The forecast is plain arithmetic: *items left ÷ items per hour over the last 3 hours*. It runs locally for the demo and ships with a Dockerfile.
 
-**Donor ledger (Solana).** A restock (`r` on the laptop) and each day's total are written to devnet as Memo-program transactions. We build and sign the transactions ourselves, about 40 lines, and verified them against the `solders` parser and devnet's own simulator. `/ledger` reads them back straight from the chain, so a donor doesn't have to trust our server. Records can only hold plain integer counts, so a vector literally can't be written.
+**Donor ledger (Solana).** A restock (`r` on the laptop) and each day's total are written to devnet as Memo-program transactions. We build and sign the transactions ourselves, about 40 lines, cross-checked against the `solders` parser. A real record is on chain now, written by the machine and read back through our own API: [explorer link](https://explorer.solana.com/tx/5evYbxdsuERUZMWZpXQu8LMiYswa5yVRzHaanUW8X9k4spcPcCCHCv2B87bwb5vdhmBZ8V9wfQjk3S66gPAapLiG?cluster=devnet). `/ledger` reads records straight from the chain, so a donor doesn't have to trust our server. Records can only hold plain integer counts, so a vector literally can't be written.
 
 **Restock advice (Gemini).** `/insights` sends Gemini hourly counts, items left and today's unique count. It asks for two sentences staff can act on and caches the answer for 10 minutes. Without a key it falls back to the same arithmetic as the forecast.
 
@@ -59,7 +59,7 @@ Around the machine:
 - **Power.** On USB power, the servo's current draw browned out the Uno mid-sweep. On the 9V battery, one test run froze the board after three sweeps with no clean reset. We attach the servo only while it moves, added a hardware watchdog so a freeze recovers in 2 seconds, and show a jam alert when a dispense doesn't answer.
 - **The Arduino compiler on Apple Silicon.** The AVR toolchain `arduino-cli` downloads is an Intel binary (`bad CPU type in executable`) until Rosetta is installed.
 - **A sensor that isn't there looks like an empty room.** If the ultrasonic sensor were unplugged, the machine would sleep forever. The Arduino now pings once at boot with a 4 m range and reports `nosensor` if nothing ever echoes. The laptop then stays awake.
-- **Proving we don't save faces.** Saying it is easy. Our test runs a full session under Python audit hooks and fails if *anything* opens a file for writing or connects off the machine. We checked that it catches a plain write, a `numpy.save` and an outgoing socket.
+- **Proving we don't save faces.** Saying it is easy. Our test runs a full session under Python audit hooks and fails if *anything* opens a file for writing or connects off the machine. We deliberately tried to sneak data past it with a plain file write, a `numpy.save` of a vector and an outgoing socket. It caught all three.
 - **Detector jitter vs. real motion.** Keypoints jitter about a pixel between frames, which is about as big as a small natural head movement. Smoothing over 3 frames helped, and blink detection covers the rest.
 - **Rate-limited faucets.** The devnet faucet returned 429s, so we validated our hand-built transactions with devnet's `simulateTransaction` (signature verified) before funding the wallet from the web faucet.
 
@@ -67,9 +67,9 @@ Around the machine:
 
 - A privacy promise that's **enforced by tests**, down to what each sponsor API receives.
 - Six cloud integrations that each **degrade gracefully**: pull any key and the machine keeps dispensing.
-- Real, measured numbers: **62 ms per frame, 1.1 ms to decide, 4.87 s per dispense**.
+- Real, measured numbers: **62 ms per frame, 1.1 ms to decide, 5.51 s per dispense** — straight from `GET /metrics`.
 - A donor ledger that proves impact publicly without putting a single student on chain.
-- [___ students served / ___ items dispensed during testing.]
+- 98 tests that need no hardware and no API keys, so any judge can clone the repo and run them.
 
 ## What we learned
 
@@ -88,4 +88,8 @@ Around the machine:
 
 ## Built with
 
-arduino · c++ · python · insightface · onnxruntime · opencv · numpy · pyserial · fastapi · uvicorn · postgresql · timescaledb · tiger-data · snowflake · solana · gemini · elevenlabs · digitalocean · docker · html · javascript · pytest
+arduino · c++ · python · insightface · onnxruntime · opencv · numpy · pyserial · fastapi · uvicorn · snowflake · solana · gemini · elevenlabs · vercel · docker · html · javascript · pytest
+
+## Honest about what isn't live yet
+
+The machine, the kiosk, the dashboard, Snowflake, Gemini, ElevenLabs and the Solana ledger all run today. Three things are built and tested but not switched on: the **Tiger Data** hypertable (schema and sink verified against a local TimescaleDB, but our cloud service password was rejected), the **DigitalOcean** deploy of the fleet API (spec and Dockerfile ready, the API runs locally), and the **ultrasonic sleep/wake sensor** (code live and tested; the sensor isn't wired, so the Arduino reports `nosensor` and the machine stays awake).
