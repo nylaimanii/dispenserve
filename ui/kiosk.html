@@ -3,14 +3,17 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
 <title>Dispenserve</title>
 <style>
   :root{
-    --ink: #f2efe9;
-    --ink-dim: #8a877f;
-    --bg: #050505;
-    --amber: #e0a838;
-    --amber-dim: #6b5220;
+    --ink: #f4f1ea;
+    --ink-dim: #8e8b82;
+    --bg: #040404;
+    --amber: #e8b657;
+    --amber-deep: #c98b2a;
+    --calm-red: #d97a52;
   }
   *{ box-sizing: border-box; }
   html,body{
@@ -19,85 +22,141 @@
     overflow: hidden;
     -webkit-user-select: none; user-select: none;
     cursor: none;
+    -webkit-tap-highlight-color: transparent;
   }
   body{
     display:flex; align-items:center; justify-content:center;
-    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Helvetica, Arial, sans-serif;
     color: var(--ink);
+    font-feature-settings: "ss01", "cv01";
   }
-  .stage{
-    display:flex; flex-direction:column; align-items:center; gap: 6vh;
-    transition: opacity 900ms ease, transform 900ms ease;
-  }
-  body.asleep .stage{ opacity: 0; transform: scale(0.96); }
 
-  /* ---- Sleep: black screen, softly breathing logo ---- */
-  .sleep{
-    position: fixed; inset: 0;
-    display:flex; flex-direction:column; align-items:center; justify-content:center; gap: 4vh;
-    opacity: 0; pointer-events: none;
+  /* ---- background layers ---- */
+  #aurora{
+    position: fixed; inset: -10%;
+    width: 120%; height: 120%;
+    filter: blur(60px) saturate(115%);
+    opacity: 0.9;
+    pointer-events: none;
+  }
+  .vignette{
+    position: fixed; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 26vh 6vh rgba(0,0,0,0.92);
+  }
+  .edge{
+    position: fixed; inset: 0; pointer-events: none;
+    opacity: 0;
     transition: opacity 900ms ease;
+    background:
+      radial-gradient(120% 60% at 50% -10%, var(--edge-color) 0%, transparent 60%),
+      radial-gradient(120% 60% at 50% 110%, var(--edge-color) 0%, transparent 60%),
+      radial-gradient(60% 120% at -10% 50%, var(--edge-color) 0%, transparent 60%),
+      radial-gradient(60% 120% at 110% 50%, var(--edge-color) 0%, transparent 60%);
+    mix-blend-mode: screen;
   }
-  body.asleep .sleep{ opacity: 1; }
-  .logo{
-    display:flex; flex-direction:column; align-items:center; gap: 3.5vh;
-    animation: breathe 4.5s ease-in-out infinite;
+
+  /* ---- scanner ---- */
+  .stage{
+    position: relative; z-index: 2;
+    display:flex; flex-direction:column; align-items:center; gap: 5.5vh;
+    transition: opacity 1000ms ease, transform 1000ms cubic-bezier(.2,.7,.2,1);
   }
-  .logo svg{ width: 16vh; height: 16vh; transform: none; }
-  .logo .disc{ fill:none; stroke: var(--amber); stroke-width: 6; }
-  .logo .slot{ fill: var(--amber); }
-  .logo .hub{ fill: var(--amber); }
-  .wordmark{
-    font-size: 7.5vh; font-weight: 600; letter-spacing: -0.03em; color: var(--ink);
+  body.asleep .stage{ opacity: 0; transform: scale(0.94); }
+
+  .ring-wrap{ position: relative; width: 48vh; height: 48vh; }
+  .ring-wrap svg{ width:100%; height:100%; transform: rotate(-90deg); display:block; overflow: visible; }
+  .track{ fill:none; stroke: rgba(255,255,255,0.06); stroke-width: 2.5; }
+  .oval{
+    fill:none; stroke: rgba(244,241,234,0.32); stroke-width: 2.5;
+    transition: stroke 600ms ease, opacity 600ms ease;
   }
-  .sleep-hint{
-    font-size: 2.6vh; color: var(--ink-dim);
-    animation: breathe 4.5s ease-in-out infinite;
-  }
-  @keyframes breathe{
-    0%, 100% { opacity: 0.35; }
-    50%      { opacity: 1; }
-  }
-  @media (prefers-reduced-motion: reduce){
-    .logo, .sleep-hint{ animation: none; opacity: 0.8; }
-  }
-  .ring-wrap{
-    position: relative;
-    width: 46vh; height: 46vh;
-  }
-  svg{ width:100%; height:100%; transform: rotate(-90deg); display:block; }
-  .track{ fill:none; stroke: #1c1a16; stroke-width: 3; }
-  .oval{ fill:none; stroke: var(--ink-dim); stroke-width: 3; transition: stroke 400ms ease, opacity 400ms ease; }
   .progress{
-    fill:none; stroke: var(--amber); stroke-width: 3;
+    fill:none; stroke: var(--amber); stroke-width: 4;
     stroke-linecap: round;
-    transition: stroke-dashoffset 120ms linear, opacity 400ms ease;
+    opacity: 0;
+    transition: opacity 500ms ease, stroke 600ms ease;
+    filter: drop-shadow(0 0 10px rgba(232,182,87,0.75)) drop-shadow(0 0 28px rgba(232,182,87,0.35));
   }
+  .halo{
+    fill:none; stroke: var(--amber); stroke-width: 12; opacity: 0;
+    filter: blur(14px);
+    transition: opacity 600ms ease, stroke 600ms ease;
+  }
+  .burst{
+    fill:none; stroke: var(--amber); stroke-width: 3; opacity: 0;
+    transform-origin: 100px 100px;
+  }
+  .burst.go{ animation: burst 1500ms cubic-bezier(.15,.7,.3,1) forwards; }
+  .burst.go.two{ animation-delay: 160ms; }
+  .burst.go.three{ animation-delay: 320ms; }
+  @keyframes burst{
+    0%   { opacity: 0.85; transform: scale(0.82); stroke-width: 4; }
+    70%  { opacity: 0.12; }
+    100% { opacity: 0; transform: scale(1.5); stroke-width: 0.5; }
+  }
+
   .mark{
     position:absolute; inset:0;
     display:flex; align-items:center; justify-content:center;
-    font-size: 8vh; font-weight: 600; letter-spacing: -0.02em;
-    opacity: 0; transition: opacity 400ms ease;
+    opacity: 0; transform: scale(0.7);
+    transition: opacity 500ms ease, transform 700ms cubic-bezier(.2,1.3,.4,1);
   }
-  .mark.show{ opacity: 1; }
+  .mark.show{ opacity: 1; transform: scale(1); }
+  .mark svg{ width: 34%; height: 34%; transform: none; overflow: visible; }
+  .mark path{
+    fill: none; stroke: var(--amber); stroke-width: 7; stroke-linecap: round; stroke-linejoin: round;
+    filter: drop-shadow(0 0 14px rgba(232,182,87,0.6));
+    stroke-dasharray: 120; stroke-dashoffset: 120;
+  }
+  .mark.show path{ animation: draw 700ms 120ms cubic-bezier(.3,.8,.3,1) forwards; }
+  @keyframes draw{ to { stroke-dashoffset: 0; } }
+
+  .copy{ text-align:center; }
   .caption{
-    font-size: 5.6vh; font-weight: 500; text-align:center;
-    line-height: 1.25; max-width: 70vw;
-    transition: opacity 300ms ease;
+    font-size: 6.2vh; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1;
+    margin: 0; transition: opacity 500ms ease;
   }
-  .caption .item{ color: var(--amber); }
-  .caption.sub{
-    font-size: 3.4vh; color: var(--ink-dim); font-weight: 400; margin-top: -2vh;
+  .subcaption{
+    font-size: 3.2vh; font-weight: 400; color: var(--ink-dim);
+    margin-top: 1.6vh; letter-spacing: -0.01em;
+    transition: opacity 500ms ease, color 600ms ease;
   }
+  .subcaption .item{ color: var(--amber); font-weight: 500; }
+
+  /* ---- sleep ---- */
+  .sleep{
+    position: fixed; inset: 0; z-index: 3;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap: 4vh;
+    opacity: 0; pointer-events: none;
+    transition: opacity 1000ms ease;
+  }
+  body.asleep .sleep{ opacity: 1; }
+  .logo{ display:flex; flex-direction:column; align-items:center; gap: 3.5vh; animation: breathe 5s ease-in-out infinite; }
+  .logo svg{ width: 15vh; height: 15vh; }
+  .logo .disc{ fill:none; stroke: var(--amber); stroke-width: 5; }
+  .logo .slot, .logo .hub{ fill: var(--amber); }
+  .wordmark{ font-size: 7vh; font-weight: 600; letter-spacing: -0.035em; }
+  .sleep-hint{ font-size: 2.8vh; color: var(--ink-dim); letter-spacing: -0.01em; animation: breathe 5s ease-in-out infinite; }
+  @keyframes breathe{ 0%,100%{ opacity: 0.32; } 50%{ opacity: 1; } }
+
   .dot{
-    position:fixed; bottom: 3vh; right: 3vh;
-    width: 10px; height:10px; border-radius: 50%;
-    background: #2a2a2a; transition: background 300ms ease;
+    position:fixed; bottom: 2.6vh; right: 2.6vh; z-index: 4;
+    width: 9px; height:9px; border-radius: 50%;
+    background: #2a2a2a; transition: background 400ms ease;
   }
   .dot.live{ background: #3fae5c; }
+
+  @media (prefers-reduced-motion: reduce){
+    .logo, .sleep-hint{ animation: none; opacity: 0.85; }
+    .burst.go{ animation-duration: 1ms; }
+  }
 </style>
 </head>
 <body class="asleep">
+  <canvas id="aurora"></canvas>
+  <div class="edge" id="edge"></div>
+  <div class="vignette"></div>
+
   <div class="sleep" aria-hidden="true">
     <div class="logo">
       <svg viewBox="0 0 100 100">
@@ -115,74 +174,203 @@
     <div class="ring-wrap">
       <svg viewBox="0 0 200 200">
         <circle class="track" cx="100" cy="100" r="90"></circle>
+        <circle id="halo" class="halo" cx="100" cy="100" r="90"></circle>
         <circle id="oval" class="oval" cx="100" cy="100" r="90"></circle>
         <circle id="progress" class="progress" cx="100" cy="100" r="90"
-                stroke-dasharray="565.48" stroke-dashoffset="565.48" opacity="0"></circle>
+                stroke-dasharray="565.48" stroke-dashoffset="565.48"></circle>
+        <circle id="burst1" class="burst" cx="100" cy="100" r="90"></circle>
+        <circle id="burst2" class="burst two" cx="100" cy="100" r="90"></circle>
+        <circle id="burst3" class="burst three" cx="100" cy="100" r="90"></circle>
       </svg>
-      <div id="mark" class="mark"></div>
+      <div id="mark" class="mark">
+        <svg viewBox="0 0 100 100"><path id="markPath" d=""></path></svg>
+      </div>
     </div>
-    <div>
+    <div class="copy">
       <div id="caption" class="caption">Step up.</div>
-      <div id="subcaption" class="caption sub"></div>
+      <div id="subcaption" class="subcaption"></div>
     </div>
   </div>
+
   <div id="dot" class="dot"></div>
 
 <script>
-  // ---- Configuration -----------------------------------------------------
-  // Points at the laptop over the hotspot. Override with ?endpoint= if needed.
+  // ---- Configuration (unchanged) -------------------------------------------
   const params = new URLSearchParams(location.search);
   const ENDPOINT = params.get("endpoint") || "/state";
   const POLL_MS = 300;
 
-  // ---- Elements ------------------------------------------------------------
   const oval = document.getElementById("oval");
   const progress = document.getElementById("progress");
+  const halo = document.getElementById("halo");
   const mark = document.getElementById("mark");
+  const markPath = document.getElementById("markPath");
   const caption = document.getElementById("caption");
   const subcaption = document.getElementById("subcaption");
+  const edge = document.getElementById("edge");
   const dot = document.getElementById("dot");
+  const bursts = [document.getElementById("burst1"), document.getElementById("burst2"), document.getElementById("burst3")];
   const CIRC = 565.48;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   let currentState = null;
   let everConnected = false;
   let failCount = 0;
 
-  // Smooth self-driven ring fill so it always looks like 3s even if the
-  // laptop only sends coarse progress ticks.
+  const CHECK = "M26 52 L44 70 L76 32";
+  const DASH  = "M30 50 L70 50";
+
+  // Colors and glow strength per state. The aurora eases toward these.
+  const LOOKS = {
+    sleep:          { rgb: [120, 92, 40],   glow: 0.10, accent: "#e8b657" },
+    idle:           { rgb: [176, 128, 48],  glow: 0.26, accent: "#e8b657" },
+    scanning:       { rgb: [232, 182, 87],  glow: 0.55, accent: "#e8b657" },
+    dispensed:      { rgb: [214, 176, 92],  glow: 0.95, accent: "#f0c979" },
+    already_served: { rgb: [186, 96, 66],   glow: 0.42, accent: "#d97a52" },
+  };
+
+  // ---- Ambient aurora + particles -------------------------------------------
+  const canvas = document.getElementById("aurora");
+  const ctx = canvas.getContext("2d");
+  const SCALE = 0.28;                      // render small and let CSS blur do the work
+  let W = 0, H = 0;
+  const blobs = [];
+  const sparks = [];
+  let look = { rgb: [...LOOKS.sleep.rgb], glow: LOOKS.sleep.glow };
+  let target = { rgb: [...LOOKS.sleep.rgb], glow: LOOKS.sleep.glow };
+  let scanProgress = 0;
+
+  function resize(){
+    W = canvas.width = Math.max(1, Math.round(window.innerWidth * SCALE));
+    H = canvas.height = Math.max(1, Math.round(window.innerHeight * SCALE));
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  for (let i = 0; i < 5; i++){
+    blobs.push({
+      x: Math.random(), y: Math.random(),
+      r: 0.35 + Math.random() * 0.35,
+      sx: (Math.random() - 0.5) * 0.00006,
+      sy: (Math.random() - 0.5) * 0.00006,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.00018 + Math.random() * 0.00022,
+    });
+  }
+
+  function spawnSparks(n){
+    if (reduceMotion) return;
+    for (let i = 0; i < n; i++){
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 0.00022 + Math.random() * 0.0007;
+      sparks.push({ x: 0.5, y: 0.5, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 1 });
+    }
+  }
+
+  function lerp(a, b, t){ return a + (b - a) * t; }
+
+  function drawAurora(t){
+    ctx.clearRect(0, 0, W, H);
+    look.glow = lerp(look.glow, target.glow, 0.035);
+    for (let i = 0; i < 3; i++) look.rgb[i] = lerp(look.rgb[i], target.rgb[i], 0.035);
+    const [r, g, b] = look.rgb.map(Math.round);
+
+    ctx.globalCompositeOperation = "lighter";
+    for (const blob of blobs){
+      const drift = Math.sin(t * blob.speed + blob.phase);
+      const x = ((blob.x + blob.sx * t) % 1 + 1) % 1;
+      const y = ((blob.y + blob.sy * t + drift * 0.04) % 1 + 1) % 1;
+      const radius = blob.r * Math.min(W, H) * (0.9 + drift * 0.12);
+      const alpha = look.glow * (0.34 + 0.16 * Math.sin(t * blob.speed * 1.7 + blob.phase));
+      const grad = ctx.createRadialGradient(x * W, y * H, 0, x * W, y * H, radius);
+      grad.addColorStop(0, `rgba(${r},${g},${b},${Math.max(0, alpha)})`);
+      grad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(x * W, y * H, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (let i = sparks.length - 1; i >= 0; i--){
+      const s = sparks[i];
+      s.x += s.vx * 16; s.y += s.vy * 16; s.life -= 0.012;
+      if (s.life <= 0){ sparks.splice(i, 1); continue; }
+      ctx.fillStyle = `rgba(${r},${g},${b},${s.life * 0.9})`;
+      ctx.beginPath();
+      ctx.arc(s.x * W, s.y * H, Math.max(0.6, 2.2 * s.life), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function frame(t){
+    drawAurora(t);
+    if (currentState === "scanning"){
+      const eased = 0.45 + 0.5 * scanProgress;
+      target.glow = LOOKS.scanning.glow * (0.8 + 0.5 * scanProgress);
+      edge.style.opacity = eased;
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // ---- Ring fill (self-driven, unchanged timing) -----------------------------
   let ringStart = null;
   let ringRAF = null;
   function animateRing(){
     if (currentState !== "scanning"){ cancelAnimationFrame(ringRAF); return; }
     const elapsed = (performance.now() - ringStart) / 1000;
     const frac = Math.min(elapsed / 3, 1);
+    scanProgress = frac;
     progress.style.strokeDashoffset = CIRC * (1 - frac);
-    if (frac < 1) ringRAF = requestAnimationFrame(animateRing);
+    halo.style.opacity = 0.25 + 0.45 * frac;
+    ringRAF = requestAnimationFrame(animateRing);
   }
 
+  function setLook(state){
+    const preset = LOOKS[state] || LOOKS.idle;
+    target.rgb = [...preset.rgb];
+    target.glow = preset.glow;
+    edge.style.setProperty("--edge-color", `rgba(${preset.rgb.join(",")},0.5)`);
+    edge.style.opacity = state === "sleep" ? 0.12 : state === "dispensed" ? 0.95 : state === "already_served" ? 0.5 : 0.3;
+    document.documentElement.style.setProperty("--amber", preset.accent);
+  }
+
+  function playBurst(){
+    bursts.forEach((b, i) => {
+      b.classList.remove("go");
+      void b.offsetWidth;                     // restart the animation
+      b.classList.add("go");
+    });
+    spawnSparks(26);
+  }
+
+  // ---- State rendering (same states, same data) ------------------------------
   function render(state, data){
-    // sleep is its own layer: fade the scanner out and the logo in, and back
     document.body.classList.toggle("asleep", state === "sleep");
     if (state === "sleep"){
+      if (currentState !== "sleep"){ setLook("sleep"); cancelAnimationFrame(ringRAF); }
       currentState = "sleep";
-      cancelAnimationFrame(ringRAF);
       return;
     }
-    if (state === currentState) {
+    if (state === currentState){
       if (state === "dispensed") setItem(data && data.item);
       return;
     }
     currentState = state;
+    setLook(state);
 
-    oval.style.opacity = state === "scanning" ? 0 : 1;
-    progress.style.opacity = state === "scanning" ? 1 : 0;
     mark.classList.remove("show");
-    mark.textContent = "";
+    oval.style.stroke = state === "already_served" ? "rgba(217,122,82,0.42)" : "rgba(244,241,234,0.32)";
+    oval.style.opacity = state === "scanning" ? 0 : 1;
+    progress.style.opacity = state === "scanning" || state === "dispensed" ? 1 : 0;
+    halo.style.opacity = state === "scanning" ? 0.25 : state === "dispensed" ? 0.8 : 0;
 
     if (state === "idle"){
       progress.style.strokeDashoffset = CIRC;
+      scanProgress = 0;
       caption.textContent = "Step up.";
-      subcaption.textContent = "";
+      subcaption.textContent = "One snack per person, per day.";
     }
     else if (state === "scanning"){
       progress.style.strokeDashoffset = CIRC;
@@ -190,19 +378,20 @@
       cancelAnimationFrame(ringRAF);
       ringRAF = requestAnimationFrame(animateRing);
       caption.textContent = "Hold still.";
-      subcaption.textContent = "";
+      subcaption.textContent = "Nothing about your face is saved.";
     }
     else if (state === "dispensed"){
       progress.style.strokeDashoffset = 0;
-      mark.textContent = "✓";
+      scanProgress = 1;
+      markPath.setAttribute("d", CHECK);
       mark.classList.add("show");
+      playBurst();
       caption.textContent = "Take it.";
       setItem(data && data.item);
     }
     else if (state === "already_served"){
       progress.style.opacity = 0;
-      oval.style.stroke = "var(--ink-dim)";
-      mark.textContent = "—";
+      markPath.setAttribute("d", DASH);
       mark.classList.add("show");
       caption.textContent = "You've already got yours today.";
       subcaption.textContent = "Come back tomorrow.";
@@ -210,10 +399,11 @@
   }
 
   function setItem(item){
-    subcaption.textContent = item ? item : "";
+    subcaption.innerHTML = item ? `Enjoy your <span class="item"></span>` : "";
+    if (item) subcaption.querySelector(".item").textContent = item;
   }
 
-  // ---- Demo cycle: runs until the real endpoint answers once --------------
+  // ---- Demo cycle: runs until the real endpoint answers once ------------------
   const DEMO_SEQUENCE = ["sleep", "idle", "scanning", "dispensed", "idle", "scanning", "already_served"];
   let demoIndex = 0;
   let demoTimer = null;
@@ -226,7 +416,7 @@
   }
   demoStep();
 
-  // ---- Live polling ---------------------------------------------------------
+  // ---- Live polling (unchanged) ------------------------------------------------
   async function poll(){
     try {
       const res = await fetch(ENDPOINT, { cache: "no-store" });
@@ -243,10 +433,8 @@
     } catch (err){
       failCount++;
       if (everConnected && failCount > 3){
-        // Endpoint dropped mid-event: hold the last real state, no error shown.
         dot.classList.remove("live");
       }
-      // Before first real connection, the demo cycle above just keeps running.
     } finally {
       setTimeout(poll, POLL_MS);
     }
