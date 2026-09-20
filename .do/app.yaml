@@ -9,10 +9,12 @@ name: dispenserve-fleet
 region: nyc
 services:
   - name: fleet-api
-    github:
-      repo: nylaimanii/dispenserve
+    # plain git clone: works without connecting DigitalOcean to a GitHub account.
+    # Swap to `github: {repo, branch, deploy_on_push: true}` once GitHub is authorised
+    # in the DO console if you want auto-deploys on push.
+    git:
+      repo_clone_url: https://github.com/nylaimanii/dispenserve.git
       branch: main
-      deploy_on_push: true
     source_dir: cloud/api
     dockerfile_path: cloud/api/Dockerfile
     http_port: 8080
@@ -37,4 +39,4 @@ services:
         value: "3"
       - key: SOLANA_LEDGER_ADDRESSES  # comma-separated devnet wallet addresses of the machines
         scope: RUN_TIME
-        value: ""
+        value: "AmEVPvxvZx4PgJCSjZtSEhU3PT9xCfbgNKqzEN1A9xFN"

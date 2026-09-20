@@ -19,7 +19,7 @@ Walk up to the machine. An ultrasonic sensor notices you and the kiosk fades fro
 Around the machine:
 
 - **Staff** get an operator dashboard with stock per bay, a dispensed-per-hour chart, jam and low-stock alerts, a Gemini-written restock recommendation, and a fleet view with a run-out forecast. It's live at [dispenserve-dashboard.vercel.app](https://dispenserve-dashboard.vercel.app).
-- **Donors** get a public ledger on Solana. Every restock and every day's total is written on chain with an explorer link, so they can watch their money turn into snacks. No student ever appears in it.
+- **Donors** get a public ledger on Solana devnet. Every restock and every day's total is written on chain with an explorer link, so they can watch their money turn into snacks. No student ever appears in it.
 - **Students** get a snack without handing over a name, an ID, or a photo.
 
 ## How we built it
@@ -41,9 +41,9 @@ Around the machine:
 
 **Anti-spoofing.** A liveness check built from the landmarks insightface already returns. It counts a blink (eye openness dips) or real 3D motion: a photo waved in front of the camera only moves its keypoints in flat 2D, while a real head's nose shifts relative to its eyes. All 10 of our real scans passed, scoring 1.49 to 30.95 (1.0 passes), and a still image scores 0.00. We have not tested it against a phone held up to the camera, which is exactly why it only logs by default and can never turn anyone away.
 
-**Fleet telemetry (Snowflake).** Each event is exactly `{machine_id, bay, event, ts}`, batched on a background thread into a Snowflake table with a `DAILY_BAY_SUMMARY` view: dispensed, repeat visits and restocks per machine, bay and day. The sink layer fans out to any number of destinations, each with its own queue and retry, so one slow service never blocks another or the camera.
+**Fleet telemetry (Tiger Data + Snowflake).** Each event is exactly `{machine_id, bay, event, ts}`, fanned out on background threads to a **Tiger Data** hypertable (with an hourly continuous aggregate and retention policies) and to a **Snowflake** table with a `DAILY_BAY_SUMMARY` view: dispensed, repeat visits and restocks per machine, bay and day. Each destination has its own queue and retry, so one slow service never blocks the other or the camera.
 
-**Fleet API.** A FastAPI service serves `/fleet` (stock and last-seen per machine), `/forecast`, `/hourly` and `/ledger`. The forecast is plain arithmetic: *items left ÷ items per hour over the last 3 hours*. It runs locally for the demo and ships with a Dockerfile.
+**Fleet API (DigitalOcean).** A FastAPI service on **DigitalOcean App Platform**, deployed from a spec file with one command, serves `/fleet` (stock and last-seen per machine), `/forecast`, `/hourly` and `/ledger`: https://dispenserve-fleet-6txue.ondigitalocean.app/fleet. The forecast is plain arithmetic: *items left ÷ items per hour over the last 3 hours*. It reads the Tiger Data hypertable and the Solana ledger, and it never sees anything personal, because the database has nothing personal in it.
 
 **Donor ledger (Solana).** A restock (`r` on the laptop) and each day's total are written to devnet as Memo-program transactions. We build and sign the transactions ourselves, about 40 lines, cross-checked against the `solders` parser. A real record is on chain now, written by the machine and read back through our own API: [explorer link](https://explorer.solana.com/tx/5evYbxdsuERUZMWZpXQu8LMiYswa5yVRzHaanUW8X9k4spcPcCCHCv2B87bwb5vdhmBZ8V9wfQjk3S66gPAapLiG?cluster=devnet). `/ledger` reads records straight from the chain, so a donor doesn't have to trust our server. Records can only hold plain integer counts, so a vector literally can't be written.
 
@@ -88,8 +88,8 @@ Around the machine:
 
 ## Built with
 
-arduino · c++ · python · insightface · onnxruntime · opencv · numpy · pyserial · fastapi · uvicorn · snowflake · solana · gemini · elevenlabs · vercel · docker · html · javascript · pytest
+arduino · c++ · python · insightface · onnxruntime · opencv · numpy · pyserial · fastapi · uvicorn · postgresql · timescaledb · tiger-data · snowflake · solana · gemini · elevenlabs · digitalocean · vercel · docker · html · javascript · pytest
 
 ## Honest about what isn't live yet
 
-The machine, the kiosk, the dashboard, Snowflake, Gemini, ElevenLabs and the Solana ledger all run today. Three things are built and tested but not switched on: the **Tiger Data** hypertable (schema and sink verified against a local TimescaleDB, but our cloud service password was rejected), the **DigitalOcean** deploy of the fleet API (spec and Dockerfile ready, the API runs locally), and the **ultrasonic sleep/wake sensor** (code live and tested; the sensor isn't wired, so the Arduino reports `nosensor` and the machine stays awake).
+Everything above runs right now: the machine, the kiosk, the dashboard, Tiger Data, Snowflake, Gemini, ElevenLabs, the Solana ledger and the DigitalOcean fleet API. Two things are built but not switched on. The **ultrasonic sleep/wake sensor** works in code and in tests, but the sensor isn't wired yet, so the Arduino reports `nosensor` and the machine simply stays awake. The **liveness check** scores every scan and logs it, but it is off by default and we have not yet tested it against a phone photo, so we don't claim it as a working defence.
