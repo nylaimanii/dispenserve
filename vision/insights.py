@@ -24,7 +24,7 @@ CACHE_SECONDS = 10 * 60
 DEFAULT_MODEL = "gemini-flash-latest"
 API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 RATE_WINDOW_HOURS = 3
-LOW_ITEMS = 5
+LOW_ITEMS = 3
 
 
 def aggregate_snapshot(app_state, now=None):

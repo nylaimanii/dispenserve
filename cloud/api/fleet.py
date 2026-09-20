@@ -8,7 +8,7 @@ import datetime
 import math
 from dataclasses import dataclass, field
 
-LOW_ITEMS = 5  # matches a "running low" line a person would draw by eye
+LOW_ITEMS = 3  # matches the machine's own low-stock warning (vision/state.py)
 LOW_HOURS = 4.0
 ONLINE_MINUTES = 30  # machines only report on events, so "last seen" is the last event
 

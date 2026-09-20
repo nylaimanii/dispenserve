@@ -31,7 +31,7 @@ services:
         value: "UTC"
       - key: BAY_CAPACITY
         scope: RUN_TIME
-        value: "24"
+        value: "20"
       - key: FORECAST_WINDOW_HOURS
         scope: RUN_TIME
         value: "3"

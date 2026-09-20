@@ -32,13 +32,9 @@
   }
 
   /* ---- background layers ---- */
-  #aurora{
-    position: fixed; inset: -10%;
-    width: 120%; height: 120%;
-    filter: blur(60px) saturate(115%);
-    opacity: 0.9;
-    pointer-events: none;
-  }
+  canvas{ position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #aurora{ filter: blur(60px) saturate(115%); opacity: 0.9; }
+  #grid{ opacity: 0.85; }   /* abstract geometry: never a face, never a camera feed */
   .vignette{
     position: fixed; inset: 0; pointer-events: none;
     box-shadow: inset 0 0 26vh 6vh rgba(0,0,0,0.92);
@@ -139,6 +135,19 @@
   .sleep-hint{ font-size: 2.8vh; color: var(--ink-dim); letter-spacing: -0.01em; animation: breathe 5s ease-in-out infinite; }
   @keyframes breathe{ 0%,100%{ opacity: 0.32; } 50%{ opacity: 1; } }
 
+  .timer{
+    position:absolute; left: 50%; bottom: -8.2vh; transform: translateX(-50%);
+    font-size: 2.4vh; letter-spacing: 0.14em; text-transform: uppercase;
+    color: #a8a49a; font-variant-numeric: tabular-nums; text-shadow: 0 0 16px rgba(0,0,0,.8);
+    opacity: 0; transition: opacity 500ms ease;
+  }
+  .timer.show{ opacity: 1; }
+  .badge{
+    position: fixed; left: 3vh; bottom: 3vh; z-index: 4;
+    font-size: 1.9vh; color: #5d5a53;
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 999px;
+    padding: 0.9vh 1.8vh; background: rgba(255,255,255,0.02);
+  }
   .dot{
     position:fixed; bottom: 2.6vh; right: 2.6vh; z-index: 4;
     width: 9px; height:9px; border-radius: 50%;
@@ -154,6 +163,7 @@
 </head>
 <body class="asleep">
   <canvas id="aurora"></canvas>
+  <canvas id="grid"></canvas>
   <div class="edge" id="edge"></div>
   <div class="vignette"></div>
 
@@ -185,6 +195,7 @@
       <div id="mark" class="mark">
         <svg viewBox="0 0 100 100"><path id="markPath" d=""></path></svg>
       </div>
+      <div id="timer" class="timer"></div>
     </div>
     <div class="copy">
       <div id="caption" class="caption">Step up.</div>
@@ -192,6 +203,7 @@
     </div>
   </div>
 
+  <div class="badge">no photos. no names. forgets you in 24h.</div>
   <div id="dot" class="dot"></div>
 
 <script>
@@ -210,6 +222,8 @@
   const edge = document.getElementById("edge");
   const dot = document.getElementById("dot");
   const bursts = [document.getElementById("burst1"), document.getElementById("burst2"), document.getElementById("burst3")];
+  const timer = document.getElementById("timer");
+  let present = false, presentFor = 0, presentSyncedAt = 0;
   const CIRC = 565.48;
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -222,11 +236,11 @@
 
   // Colors and glow strength per state. The aurora eases toward these.
   const LOOKS = {
-    sleep:          { rgb: [120, 92, 40],   glow: 0.10, accent: "#e8b657" },
-    idle:           { rgb: [176, 128, 48],  glow: 0.26, accent: "#e8b657" },
-    scanning:       { rgb: [232, 182, 87],  glow: 0.55, accent: "#e8b657" },
-    dispensed:      { rgb: [214, 176, 92],  glow: 0.95, accent: "#f0c979" },
-    already_served: { rgb: [186, 96, 66],   glow: 0.42, accent: "#d97a52" },
+    sleep:          { rgb: [120, 92, 40],   glow: 0.10, energy: 0.10, accent: "#e8b657" },
+    idle:           { rgb: [176, 128, 48],  glow: 0.26, energy: 0.35, accent: "#e8b657" },
+    scanning:       { rgb: [232, 182, 87],  glow: 0.55, energy: 1.00, accent: "#e8b657" },
+    dispensed:      { rgb: [214, 176, 92],  glow: 0.95, energy: 1.25, accent: "#f0c979" },
+    already_served: { rgb: [186, 96, 66],   glow: 0.42, energy: 0.55, accent: "#d97a52" },
   };
 
   // ---- Ambient aurora + particles -------------------------------------------
@@ -236,16 +250,77 @@
   let W = 0, H = 0;
   const blobs = [];
   const sparks = [];
-  let look = { rgb: [...LOOKS.sleep.rgb], glow: LOOKS.sleep.glow };
-  let target = { rgb: [...LOOKS.sleep.rgb], glow: LOOKS.sleep.glow };
+  const gridCanvas = document.getElementById("grid");
+  const nctx = gridCanvas.getContext("2d");
+  const nodes = [];
+  const COLS = 9, ROWS = 6, LINK = 0.17;
+  let look = { rgb: [...LOOKS.sleep.rgb], glow: LOOKS.sleep.glow, energy: LOOKS.sleep.energy };
+  let target = { rgb: [...LOOKS.sleep.rgb], glow: LOOKS.sleep.glow, energy: LOOKS.sleep.energy };
   let scanProgress = 0;
 
   function resize(){
     W = canvas.width = Math.max(1, Math.round(window.innerWidth * SCALE));
     H = canvas.height = Math.max(1, Math.round(window.innerHeight * SCALE));
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    gridCanvas.width = Math.round(window.innerWidth * dpr);
+    gridCanvas.height = Math.round(window.innerHeight * dpr);
+    nctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   window.addEventListener("resize", resize);
   resize();
+
+  // A loose jittered grid of points joined by short lines. It reacts to presence and to
+  // the scan. It is not derived from anyone's face: it looks the same for everybody, and
+  // no camera frame ever reaches this page.
+  for (let r = 0; r < ROWS; r++){
+    for (let c = 0; c < COLS; c++){
+      const x = (c + 0.5) / COLS + (Math.random() - 0.5) * 0.05;
+      const y = (r + 0.5) / ROWS + (Math.random() - 0.5) * 0.07;
+      nodes.push({ hx: x, hy: y, x, y, vx: 0, vy: 0, phase: Math.random() * 6.28, speed: 0.0004 + Math.random() * 0.0006 });
+    }
+  }
+
+  function drawGrid(t){
+    const w = window.innerWidth, h = window.innerHeight;
+    nctx.clearRect(0, 0, w, h);
+    const [r, g, b] = look.rgb.map(Math.round);
+    const energy = look.energy;
+    const pull = currentState === "scanning" ? scanProgress : 0;
+
+    for (const n of nodes){
+      let hx = n.hx, hy = n.hy;
+      if (pull > 0){                      // during a scan the network draws toward the ring
+        hx += (0.5 - n.hx) * 0.16 * pull;
+        hy += (0.5 - n.hy) * 0.16 * pull;
+      }
+      n.vx += (hx - n.x) * 0.004 + Math.sin(t * n.speed + n.phase) * 2e-5 * energy;
+      n.vy += (hy - n.y) * 0.004 + Math.cos(t * n.speed * 1.3 + n.phase) * 2e-5 * energy;
+      n.vx *= 0.94; n.vy *= 0.94;
+      n.x += n.vx; n.y += n.vy;
+    }
+
+    nctx.lineWidth = 1;
+    for (let i = 0; i < nodes.length; i++){
+      for (let j = i + 1; j < nodes.length; j++){
+        const a = nodes[i], c = nodes[j];
+        const d = Math.hypot(a.x - c.x, a.y - c.y);
+        if (d > LINK) continue;
+        nctx.strokeStyle = `rgba(${r},${g},${b},${(1 - d / LINK) * 0.22 * (0.35 + energy * 0.85)})`;
+        nctx.beginPath(); nctx.moveTo(a.x * w, a.y * h); nctx.lineTo(c.x * w, c.y * h); nctx.stroke();
+      }
+    }
+    for (const n of nodes){
+      nctx.fillStyle = `rgba(${r},${g},${b},${0.14 + 0.4 * energy})`;
+      nctx.beginPath(); nctx.arc(n.x * w, n.y * h, 1.1 + 1.5 * energy, 0, 6.2832); nctx.fill();
+    }
+  }
+
+  function impulse(){                      // dispense: push the network outward
+    for (const n of nodes){
+      const dx = n.x - 0.5, dy = n.y - 0.5, d = Math.hypot(dx, dy) || 1;
+      n.vx += (dx / d) * 0.010; n.vy += (dy / d) * 0.010;
+    }
+  }
 
   for (let i = 0; i < 5; i++){
     blobs.push({
@@ -272,6 +347,7 @@
   function drawAurora(t){
     ctx.clearRect(0, 0, W, H);
     look.glow = lerp(look.glow, target.glow, 0.035);
+    look.energy = lerp(look.energy, target.energy, 0.05);
     for (let i = 0; i < 3; i++) look.rgb[i] = lerp(look.rgb[i], target.rgb[i], 0.035);
     const [r, g, b] = look.rgb.map(Math.round);
 
@@ -305,6 +381,13 @@
 
   function frame(t){
     drawAurora(t);
+    drawGrid(t);
+    if (present){                          // ticks locally between polls so it reads smoothly
+      timer.textContent = `time here: ${(presentFor + (performance.now() - presentSyncedAt) / 1000).toFixed(1)}s`;
+      timer.classList.add("show");
+    } else {
+      timer.classList.remove("show");
+    }
     if (currentState === "scanning"){
       const eased = 0.45 + 0.5 * scanProgress;
       target.glow = LOOKS.scanning.glow * (0.8 + 0.5 * scanProgress);
@@ -331,6 +414,7 @@
     const preset = LOOKS[state] || LOOKS.idle;
     target.rgb = [...preset.rgb];
     target.glow = preset.glow;
+    target.energy = preset.energy;
     edge.style.setProperty("--edge-color", `rgba(${preset.rgb.join(",")},0.5)`);
     edge.style.opacity = state === "sleep" ? 0.12 : state === "dispensed" ? 0.95 : state === "already_served" ? 0.5 : 0.3;
     document.documentElement.style.setProperty("--amber", preset.accent);
@@ -343,10 +427,21 @@
       b.classList.add("go");
     });
     spawnSparks(26);
+    impulse();
   }
 
   // ---- State rendering (same states, same data) ------------------------------
   function render(state, data){
+    if (data && "present" in data){        // presence drives the ambient energy and the counter
+      present = !!data.present;
+      presentFor = data.present_for || 0;
+    } else {
+      present = state === "scanning" || state === "dispensed" || state === "already_served";
+      if (!present) presentFor = 0;
+    }
+    presentSyncedAt = performance.now();
+    if (present) target.energy = Math.max(target.energy, 0.6);
+
     document.body.classList.toggle("asleep", state === "sleep");
     if (state === "sleep"){
       if (currentState !== "sleep"){ setLook("sleep"); cancelAnimationFrame(ringRAF); }
@@ -407,10 +502,15 @@
   const DEMO_SEQUENCE = ["sleep", "idle", "scanning", "dispensed", "idle", "scanning", "already_served"];
   let demoIndex = 0;
   let demoTimer = null;
+  let demoPresentSince = 0;
   function demoStep(){
     const state = DEMO_SEQUENCE[demoIndex % DEMO_SEQUENCE.length];
     demoIndex++;
-    render(state, { item: "Kit Kat", progress: 1 });
+    const here = state !== "sleep" && state !== "idle";
+    if (here && !demoPresentSince) demoPresentSince = performance.now();
+    if (!here) demoPresentSince = 0;
+    render(state, { item: "Kit Kat", progress: 1, present: here,
+                    present_for: here ? (performance.now() - demoPresentSince) / 1000 : 0 });
     const hold = state === "scanning" ? 3200 : state === "idle" ? 2200 : state === "sleep" ? 4000 : 2600;
     demoTimer = setTimeout(demoStep, hold);
   }

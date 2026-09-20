@@ -5,6 +5,7 @@ nothing about people in the database, so there is nothing about people to serve.
 
     GET /fleet     every machine: items left per bay, dispensed today, last seen
     GET /forecast  per bay: estimated run-out time from the last few hours' dispense rate
+    GET /hourly    dispensed per bay per hour (from the continuous aggregate), for charts
     GET /ledger    public donor ledger: restocks and daily totals from Solana devnet memos
     GET /health
 
@@ -54,7 +55,7 @@ def settings():
     return {
         "database_url": os.environ.get("TIGER_DATABASE_URL", "").strip() or None,
         "fake": os.environ.get("FLEET_FAKE", "").strip().lower() in ("1", "true", "yes"),
-        "capacity": int(os.environ.get("BAY_CAPACITY", "24")),
+        "capacity": int(os.environ.get("BAY_CAPACITY", "20")),
         "window_hours": int(os.environ.get("FORECAST_WINDOW_HOURS", "3")),
         "timezone": os.environ.get("FLEET_TZ", "UTC"),
         "ledger_addresses": [a for a in os.environ.get("SOLANA_LEDGER_ADDRESSES", "").split(",") if a.strip()],
@@ -108,6 +109,16 @@ def create_app(fake=None):
             "window_hours": cfg["window_hours"],
             "bays": build_forecast(machines, cfg["capacity"], now, cfg["window_hours"]),
         }
+
+    @app.get("/hourly")
+    def hourly(hours: int = 24):
+        hours = max(1, min(hours, 72))
+        now = datetime.datetime.now(datetime.timezone.utc)
+        try:
+            rows = source.hourly(now, hours)
+        except Exception as e:
+            return unavailable(e)
+        return {"generated_at": now.isoformat(timespec="seconds"), "source": source.name, "hours": hours, "buckets": rows}
 
     @app.get("/ledger")
     def ledger_records():

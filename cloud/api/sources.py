@@ -36,6 +36,14 @@ class TigerSource:
         FROM bays b
     """
 
+    HOURLY_SQL = """
+        SELECT bucket, machine_id, bay, sum(dispensed)::int
+        FROM dispensed_hourly
+        WHERE bucket >= %(from_hour)s
+        GROUP BY bucket, machine_id, bay
+        ORDER BY bucket
+    """
+
     WINDOW_SQL = """
         SELECT machine_id, bay, sum(dispensed)::int
         FROM dispensed_hourly
@@ -65,6 +73,16 @@ class TigerSource:
             m.last_seen = max(m.last_seen, last_seen)
             m.bays.append(BayStats(machine_id, bay, last_restocked, since_restock, today, window.get((machine_id, bay), 0)))
         return list(machines.values())
+
+
+    def hourly(self, now, hours):
+        import psycopg
+
+        from_hour = hour_floor(now) - datetime.timedelta(hours=hours - 1)
+        with psycopg.connect(self.database_url, connect_timeout=5) as conn:
+            rows = conn.execute(self.HOURLY_SQL, {"from_hour": from_hour}).fetchall()
+        return [{"hour": b.astimezone(UTC).isoformat(timespec="minutes"), "machine_id": m, "bay": bay, "dispensed": n}
+                for b, m, bay, n in rows]
 
 
 class FakeSource:
@@ -106,6 +124,19 @@ class FakeSource:
             if p <= threshold:
                 return k
             k += 1
+
+    def hourly(self, now, hours):
+        current_hour = hour_floor(now)
+        out = []
+        for machine_id, (bays, busyness, _) in self.MACHINES.items():
+            for bay in bays:
+                for h in range(hours - 1, -1, -1):
+                    hour_start = current_hour - datetime.timedelta(hours=h)
+                    n = self._count(machine_id, bay, hour_start, busyness)
+                    if h == 0:
+                        n = round(n * (now - hour_start).total_seconds() / 3600)
+                    out.append({"hour": hour_start.isoformat(timespec="minutes"), "machine_id": machine_id, "bay": bay, "dispensed": n})
+        return out
 
     def machines(self, now, today_start, window_hours):
         current_hour = hour_floor(now)

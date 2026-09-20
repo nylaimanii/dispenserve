@@ -229,6 +229,8 @@ class Dispenserve:
         """From the serial thread: "near" wakes the scanner, "away" puts it to sleep."""
         if not self.use_sensor:
             return
+        if line in ("near", "away"):
+            self.app_state.set_presence(line == "near")
         if line == "nosensor":
             log.warning("arduino reports no ultrasonic sensor, staying awake")
             self.use_sensor = False
@@ -399,6 +401,7 @@ def run_camera(disp, camera_indexes, det_size):
 
             now = time.monotonic()
             if not disp.awake and not disp.showing_result():
+                disp.app_state.set_presence(False)
                 # asleep: the frame is not looked at, not even for face detection
                 tracker.reset()
                 armed = True
@@ -416,6 +419,7 @@ def run_camera(disp, camera_indexes, det_size):
             except Exception:
                 log.exception("detection failed on a frame")
                 faces = []
+            disp.app_state.set_presence(bool(faces))
 
             if disp.showing_result() or not armed:
                 tracker.reset()
@@ -499,6 +503,7 @@ def run_fake(disp, stop, interval=FAKE_SCAN_INTERVAL_S, hold_seconds=HOLD_SECOND
         next_scan = start + interval
         if not disp.awake:
             continue  # nobody at the machine, so nobody to scan
+        disp.app_state.set_presence(True)
         while (elapsed := time.monotonic() - start) < hold_seconds:
             disp.tick(elapsed / hold_seconds)
             if stop.wait(0.1):
@@ -507,6 +512,7 @@ def run_fake(disp, stop, interval=FAKE_SCAN_INTERVAL_S, hold_seconds=HOLD_SECOND
         while disp.showing_result():
             if stop.wait(0.1):
                 return
+        disp.app_state.set_presence(False)
         disp.tick(None)
 
 
@@ -567,7 +573,7 @@ def main(argv=None):
         return flush_running_app(args.port)
     machine_id = config.env("MACHINE_ID", "dispenserve-1")
 
-    app_state = AppState(config.env("BAY_NAME", "Kit Kat"), config.env_int("BAY_CAPACITY", 24))
+    app_state = AppState(config.env("BAY_NAME", "Kit Kat"), config.env_int("BAY_CAPACITY", 20))
     dispenser = Dispenser(enabled=not args.no_serial)
     disabled = {name for name in ("tiger", "snowflake") if getattr(args, f"no_{name}")}
     telemetry = Telemetry(machine_id, build_sinks(config.env, disabled))

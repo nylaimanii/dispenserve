@@ -2,6 +2,7 @@
 
 import datetime
 import threading
+import time
 
 SLEEP = "sleep"  # nobody at the machine: the camera loop skips face processing entirely
 IDLE = "idle"
@@ -9,6 +10,7 @@ SCANNING = "scanning"
 DISPENSED = "dispensed"
 ALREADY_SERVED = "already_served"
 STATES = (SLEEP, IDLE, SCANNING, DISPENSED, ALREADY_SERVED)
+LOW_STOCK = 3  # warn the operator at this many items left
 
 
 class AppState:
@@ -23,6 +25,8 @@ class AppState:
         self._unique_today = 0
         self._closed_days = []  # (date, dispensed_total) for days that ended while running
         self._hourly = [0] * 24  # dispensed per local hour, today
+        self._present = False    # someone is standing at the machine (face in frame, or the sensor)
+        self._present_since = None
 
     def _roll_day(self):
         today = datetime.date.today()
@@ -53,6 +57,19 @@ class AppState:
     def set_progress(self, progress):
         with self._lock:
             self._progress = max(0.0, min(1.0, float(progress)))
+
+    def set_presence(self, present):
+        """Someone is at the machine. Drives the kiosk's ambient glow and "time here" counter."""
+        with self._lock:
+            if present and not self._present:
+                self._present_since = time.monotonic()
+            elif not present:
+                self._present_since = None
+            self._present = bool(present)
+
+    def present_for(self):
+        with self._lock:
+            return 0.0 if self._present_since is None else time.monotonic() - self._present_since
 
     def set_item(self, item):
         with self._lock:
@@ -98,13 +115,25 @@ class AppState:
 
     def state_json(self):
         with self._lock:
-            return {"state": self._state, "progress": round(self._progress, 3), "item": self._item}
+            present_for = 0.0 if self._present_since is None else time.monotonic() - self._present_since
+            return {
+                "state": self._state,
+                "progress": round(self._progress, 3),
+                "item": self._item,
+                "present": self._present,
+                "present_for": round(present_for, 1),
+            }
 
     def stats_json(self):
         with self._lock:
             self._roll_day()
+            bay = dict(self._bay)
+            bay["low"] = bay["remaining"] <= LOW_STOCK
+            now_hour = datetime.datetime.now().hour
             return {
-                "bays": [dict(self._bay)],
+                "bays": [bay],
                 "dispensed_today": self._dispensed_today,
                 "unique_today": self._unique_today,
+                "low_stock": bay["low"],
+                "dispensed_per_hour": {f"{h:02d}:00": self._hourly[h] for h in range(now_hour + 1)},
             }
