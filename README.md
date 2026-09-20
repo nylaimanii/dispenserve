@@ -126,6 +126,8 @@ Open the kiosk on the iPad at `http://<laptop-ip>:8000/kiosk.html` and the opera
 | `GET /state` | `{state: sleep\|idle\|scanning\|dispensed\|already_served, progress: 0-1, item}` |
 | `GET /stats` | `{bays: [{name, remaining, capacity}], dispensed_today, unique_today, jam}` |
 | `GET /insights` | `{text, source: gemini\|rules, generated_at}`: 2 sentence restock advice, cached 10 min |
+
+**About the Gemini insight.** The first call answers instantly with the rule-based estimate (`"source": "rules"`) while Gemini is asked on a background thread; the text switches to Gemini's about 10-15 seconds later and is then cached for 10 minutes, so the demo never waits on it. A failed call is retried once after 2 seconds before falling back to the estimate, and the request timeout is 30s, which is enough on a phone hotspot. Leave `GEMINI_MODEL` unset: the default `gemini-flash-latest` works, while `gemini-2.5-flash` returns 404 for new keys ("no longer available to new users").
 | `GET /metrics` | avg / p50 / p95 ms per stage: detect, landmarks, embed, liveness, average, decide, serial |
 
 ### Donor ledger (Solana devnet)
