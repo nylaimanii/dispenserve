@@ -22,24 +22,39 @@
 | **DigitalOcean** | The fleet API now **serves the dashboard itself**, so judges open one URL with no query string, and the page talks to its own origin (no CORS, no mixed content). New `/impact` and `/ask` endpoints |
 | **Bloomberg** | Impact strip at the top of the dashboard: people served today, people served all time, days the machine served someone, restocks by volunteers. Real numbers from the hypertable, nothing invented |
 
+## Hardware needs a check in the morning
+
+You unplugged the Arduino and the camera overnight, so **neither was tested after the merge**. Everything else was verified without them. Before filming:
+
+1. Plug both in (Arduino straight into the laptop, not a hub), then `./start.sh`.
+2. The log should say `arduino connected`, `arduino ready` and `using camera index 0 (1280x720)`.
+3. Scan once → dispense, scan again → already served. If the camera opens the wrong device, set `CAMERA_INDEX` in `.env`.
+
+Nothing in the dispense path, the serial logic or the face matching was changed overnight; the only edit inside `_dispense` is a guarded low-stock voice line that swallows its own errors.
+
 ## Failed or skipped (and why)
 
-- **Gemini hit its free-tier daily quota** at ~3am from overnight testing. The quota is *per model*, so I switched `GEMINI_MODEL` to `gemini-3.5-flash`, which has a fresh allowance; the insight card is live again. If it says "Estimate" during the demo, that's the fallback working, not a crash.
+- **Gemini hit its free-tier daily quota** (`GenerateRequestsPerDayPerProjectPerModel`) at ~3am from overnight testing. The quota is *per model*, so `GEMINI_MODEL` is now `gemini-3.5-flash`, which has a fresh allowance, set both locally and on the deployed API. Verified working afterwards on the insight card and the ask box. If either says "Estimate" or "(from the numbers)" during the demo, that's the fallback working, not a crash — and if you need a third option, `gemini-flash-lite-latest` and `gemini-3.6-flash` also had quota left.
+- **The newer model spends tokens on internal reasoning**, which truncated the first ask answers mid-sentence. The output budget is now 2048 tokens and answers come back complete.
 - **DigitalOcean per-machine heartbeat: skipped.** The laptop sits behind a phone hotspot and isn't reachable from the internet, so a heartbeat would have to be an outbound ping on a timer. "Last seen" already comes from the last real event, which is honest and needs no new event type. Not worth the risk this close to the demo.
 - **Snowflake Cortex / ML forecast: skipped** in favour of plain SQL views. Cortex needs credits and a warehouse that may not be enabled on a trial account; the SQL version always works.
 - **Liveness still untested against a phone photo**, so it stays log-only. Don't claim it as a working defence.
 - **Ultrasonic sensor still not wired**; the board reports `nosensor` and the machine stays awake.
 
-## Vercel 404, fixed and explained
+## Vercel: use the DigitalOcean link instead
 
-The `dispenserve-dashboard.vercel.app` alias kept drifting off the newest production deployment, which is what produced the 404s. Every deploy now ends with an explicit `vercel alias set`, and it returns 200 with and without `?fleet=`. **If it 404s again**, one command fixes it:
+I could not make the Vercel URL public, and I want you to know exactly why rather than find out in front of a judge. **Deployment Protection is switched on for that Vercel project**, so every deployment URL redirects to a Vercel login and every alias I attach silently fails to bind (the CLI prints "Success!", but `vercel inspect` shows no aliases and the URL returns 404). I tried three different domain names with the same result, so it is the project setting and not the name. Disabling it needs the Vercel dashboard, and the sandbox blocked me from reading the CLI's stored token to do it over the API.
 
-```bash
-./build_site.sh && npx vercel deploy --prod --yes --cwd dispenserve-dashboard
-npx vercel alias set <the deployment url it prints> dispenserve-dashboard.vercel.app
-```
+**The fix, if you want the Vercel link back (about 60 seconds):**
+1. vercel.com → project `dispenserve-dashboard` → **Settings → Deployment Protection**
+2. Set **Vercel Authentication** to **Disabled**, save.
+3. `./build_site.sh && npx vercel deploy --prod --yes --cwd dispenserve-dashboard`
 
-Better still: the DigitalOcean URL now serves the same dashboard and has never drifted. Use it as the judge link.
+**You do not need it.** The DigitalOcean app serves the identical dashboard at its root, is public, and has never drifted:
+
+> **https://dispenserve-fleet-6txue.ondigitalocean.app/**
+
+That is the link to put in the Devpost and to read from on stage. It also avoids the `?fleet=` query string entirely, because the page and the API are the same origin.
 
 ## 60-second demo walkthrough (hits every sponsor)
 
@@ -66,7 +81,6 @@ Better still: the DigitalOcean URL now serves the same dashboard and has never d
 |---|---|
 | Kiosk (iPad) | `http://<printed by start.sh>:8000/kiosk.html` |
 | Judge dashboard (best link) | https://dispenserve-fleet-6txue.ondigitalocean.app/ |
-| Same dashboard on Vercel | https://dispenserve-dashboard.vercel.app |
 | Fleet API | https://dispenserve-fleet-6txue.ondigitalocean.app/fleet |
 | Solana record | [explorer](https://explorer.solana.com/tx/5evYbxdsuERUZMWZpXQu8LMiYswa5yVRzHaanUW8X9k4spcPcCCHCv2B87bwb5vdhmBZ8V9wfQjk3S66gPAapLiG?cluster=devnet) |
 

@@ -36,7 +36,7 @@ Every row below was verified by running it on demo morning. **98 tests pass.**
 |---|---|
 | Kiosk (iPad) | `http://172.20.10.2:8000/kiosk.html` — IP changes with the hotspot |
 | Operator dashboard (laptop) | `http://172.20.10.2:8000/dashboard.html?fleet=https://dispenserve-fleet-6txue.ondigitalocean.app` |
-| Public dashboard (judges) | https://dispenserve-dashboard.vercel.app |
+| Public dashboard (judges) | https://dispenserve-fleet-6txue.ondigitalocean.app/ |
 | Fleet API (DigitalOcean) | https://dispenserve-fleet-6txue.ondigitalocean.app/fleet |
 | Solana record | [explorer.solana.com/tx/5evYbx…](https://explorer.solana.com/tx/5evYbxdsuERUZMWZpXQu8LMiYswa5yVRzHaanUW8X9k4spcPcCCHCv2B87bwb5vdhmBZ8V9wfQjk3S66gPAapLiG?cluster=devnet) |
 
